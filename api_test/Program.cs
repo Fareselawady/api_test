@@ -1,8 +1,8 @@
-
 using api_test.Data;
 using api_test.Middelware;
+using Microsoft.AspNetCore.Builder;
 using Microsoft.EntityFrameworkCore;
-using Scalar.AspNetCore;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace api_test
 {
@@ -12,28 +12,30 @@ namespace api_test
         {
             var builder = WebApplication.CreateBuilder(args);
 
-            // Add services to the container.
-
+            // Add services
             builder.Services.AddControllers();
-            // Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
-            builder.Services.AddOpenApi();
+            builder.Services.AddEndpointsApiExplorer(); // ÷—Ê—Ì ··Minimal APIs
+            builder.Services.AddSwaggerGen();           //  Ê·Ìœ Swagger JSON ÊUI
 
+            // DbContext
             builder.Services.AddDbContext<AppDbContext>(options =>
-            options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
+                options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection"))
+            );
 
             var app = builder.Build();
+
+            // Middleware „Œ’’
             app.UseMiddleware<VisitorLoggingMiddleware>();
-            // Configure the HTTP request pipeline.
+
+            // Swagger UI ›Ì Development
             if (app.Environment.IsDevelopment())
             {
-                app.MapOpenApi();
-                app.MapScalarApiReference();
+                app.UseSwagger();
+                app.UseSwaggerUI();
             }
 
             app.UseHttpsRedirection();
-
             app.UseAuthorization();
-
 
             app.MapControllers();
 

@@ -1,5 +1,6 @@
 
 using api_test.Data;
+using api_test.Middelware;
 using Microsoft.EntityFrameworkCore;
 using Scalar.AspNetCore;
 
@@ -21,7 +22,7 @@ namespace api_test
             options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
 
             var app = builder.Build();
-
+            app.UseMiddleware<VisitorLoggingMiddleware>();
             // Configure the HTTP request pipeline.
             if (app.Environment.IsDevelopment())
             {

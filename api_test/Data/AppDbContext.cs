@@ -10,5 +10,7 @@ namespace api_test.Data
         {
         }
         public DbSet<Student> Students { get; set; }
+        public DbSet<VisitorLog> VisitorLogs { get; set; }
+
     }
 }

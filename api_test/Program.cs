@@ -1,5 +1,6 @@
 using api_test.Data;
 using api_test.Middelware;
+using api_test.Services;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -12,22 +13,33 @@ namespace api_test
         {
             var builder = WebApplication.CreateBuilder(args);
 
-            // Add services
             builder.Services.AddControllers();
-            builder.Services.AddEndpointsApiExplorer(); // ÷—Ê—Ì ··Minimal APIs
-            builder.Services.AddSwaggerGen();           //  Ê·Ìœ Swagger JSON ÊUI
+            builder.Services.AddEndpointsApiExplorer();
+            builder.Services.AddSwaggerGen();
 
-            // DbContext
+            // ? Add DbContext
             builder.Services.AddDbContext<AppDbContext>(options =>
                 options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection"))
             );
 
+            // ? Add Session Support
+            builder.Services.AddDistributedMemoryCache();
+            builder.Services.AddSession(options =>
+            {
+                options.IdleTimeout = TimeSpan.FromHours(1);
+                options.Cookie.HttpOnly = true;
+                options.Cookie.IsEssential = true;
+            });
+
+            builder.Services.AddScoped<IAuthService, AuthService>();
+
             var app = builder.Build();
 
-            // Middleware „Œ’’
+            // ? Enable Session Middleware
+            app.UseSession();
+
             app.UseMiddleware<VisitorLoggingMiddleware>();
 
-            // Swagger UI ›Ì Development
             if (app.Environment.IsDevelopment())
             {
                 app.UseSwagger();
@@ -35,10 +47,7 @@ namespace api_test
             }
 
             app.UseHttpsRedirection();
-            app.UseAuthorization();
-
             app.MapControllers();
-
             app.Run();
         }
     }

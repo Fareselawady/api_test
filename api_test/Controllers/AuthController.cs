@@ -1,9 +1,9 @@
-﻿using api_test.Data;
-using api_test.Entities;
+﻿using api_test.Entities;
 using api_test.Models;
 using api_test.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using api_test.Data;
 
 namespace api_test.Controllers
 {
@@ -14,32 +14,39 @@ namespace api_test.Controllers
         private readonly IAuthService _authService;
         private readonly AppDbContext _context;
 
-        public AuthController( AppDbContext _context, IAuthService authService)
+        public AuthController(IAuthService authService, AppDbContext context)
         {
-            this._context = _context;
-            this._authService = authService;
-
+            _authService = authService;
+            _context = context;
         }
 
         [HttpPost("register")]
-        public async Task<ActionResult<User>> Register(UserDto request)
+        public async Task<ActionResult> Register(UserDto request)
         {
             var user = await _authService.RegisterAsync(request);
-            if (user == null)
-                return BadRequest("Username is already taken");
 
-            return Ok(user);
+            if (user == null)
+                return BadRequest(new { message = "Username is already taken" });
+
+            return Ok(new
+            {
+                message = "Registration successful",
+                user = new { user.Id, user.Username }
+            });
         }
 
         [HttpPost("login")]
         public async Task<ActionResult> Login(UserDto request)
         {
-            var user = await _authService.LoginAsync(request);
-            if (user == null)
-                return BadRequest("Invalid username or password");
+            var token = await _authService.LoginAsync(request);
 
-            HttpContext.Session.SetInt32("UserId", user.Id);
-            HttpContext.Session.SetString("Username", user.Username);
+            if (token == null)
+                return Unauthorized(new { message = "Invalid username or password" });
+
+            var user = await _authService.GetUserByUsernameAsync(request.Username);
+
+            if (user == null)
+                return NotFound(new { message = "User not found" });
 
             var drugs = await _context.Drugs
                 .Where(d => d.UserId == user.Id)
@@ -56,29 +63,11 @@ namespace api_test.Controllers
 
             return Ok(new
             {
-                message = $"Welcome {user.Username}, you are now logged in.",
+                message = $"Welcome {user.Username}",
+                token,
+                user = new { user.Id, user.Username },
                 myDrugs = drugs
             });
-        }
-
-
-        [HttpPost("logout")]
-        public IActionResult Logout()
-        {
-            HttpContext.Session.Clear();
-            return Ok("Logged out successfully.");
-        }
-
-        [HttpGet("session-info")]
-        public IActionResult GetSessionInfo()
-        {
-            var username = HttpContext.Session.GetString("Username");
-            var id = HttpContext.Session.GetInt32("UserId");
-
-            if (username == null)
-                return Unauthorized("No active session.");
-
-            return Ok(new { id, username });
         }
     }
 }

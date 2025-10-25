@@ -6,7 +6,9 @@ namespace api_test.Services
     public interface IAuthService
     {
         Task<User?> RegisterAsync(UserDto request);
-        Task<User?> LoginAsync(UserDto request);
+
+        Task<string?> LoginAsync(UserDto request);
+
         Task<User?> GetUserByUsernameAsync(string username);
     }
 }

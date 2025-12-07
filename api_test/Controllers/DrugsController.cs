@@ -61,5 +61,34 @@ namespace api_test.Controllers
 
             return Ok(drugs);
         }
+
+        [HttpDelete]
+        public async Task<ActionResult> DeleteDrug(int drugId)
+        {
+            var userId = int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
+            var drug = await _context.Drugs
+                .FirstOrDefaultAsync(d => d.Id == drugId && d.UserId == userId);
+            if (drug == null)
+                return NotFound("Drug not found");
+            _context.Drugs.Remove(drug);
+            await _context.SaveChangesAsync();
+            return Ok("Drug deleted successfully");
+        }
+        [HttpPut]
+        public async Task<ActionResult> UpdateDrug(int drugId, CreateDrugDto dto)
+        {
+            var userId = int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
+            var drug = await _context.Drugs
+                .FirstOrDefaultAsync(d => d.Id == drugId && d.UserId == userId);
+            if (drug == null)
+                return NotFound("Drug not found");
+            drug.Name = dto.Name;
+            drug.Description = dto.Description;
+            drug.Type = dto.Type;
+            drug.ExpirationDate = dto.ExpirationDate;
+            drug.ProductDate = dto.ProductDate;
+            await _context.SaveChangesAsync();
+            return Ok("Drug updated successfully");
+        }
     }
 }

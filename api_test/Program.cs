@@ -4,6 +4,7 @@ using api_test.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
+using Scalar.AspNetCore;
 using System.Text;
 
 namespace api_test
@@ -14,14 +15,19 @@ namespace api_test
         {
             var builder = WebApplication.CreateBuilder(args);
 
+            // Controllers
             builder.Services.AddControllers();
             builder.Services.AddEndpointsApiExplorer();
-            builder.Services.AddSwaggerGen();
 
+            // OpenAPI (»œÌ· Swagger)
+            builder.Services.AddOpenApi();
+
+            // DbContext
             builder.Services.AddDbContext<AppDbContext>(options =>
                 options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection"))
             );
 
+            // JWT
             var key = Encoding.UTF8.GetBytes(builder.Configuration["AppSettings:Token"]!);
 
             builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
@@ -40,21 +46,18 @@ namespace api_test
                 });
 
             builder.Services.AddAuthorization();
-
             builder.Services.AddScoped<IAuthService, AuthService>();
 
             var app = builder.Build();
 
             app.UseMiddleware<VisitorLoggingMiddleware>();
 
-            app.UseSwagger();
-            app.UseSwaggerUI(c =>
-            {
-                c.SwaggerEndpoint("/swagger/v1/swagger.json", "API v1");
-            });
+            // OpenAPI + Scalar
+            app.MapOpenApi();            // /openapi/v1.json
+            app.MapScalarApiReference(); // /scalar
 
             app.UseHttpsRedirection();
-            app.UseAuthentication(); 
+            app.UseAuthentication();
             app.UseAuthorization();
 
             app.MapControllers();

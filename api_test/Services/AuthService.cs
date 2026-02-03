@@ -29,7 +29,7 @@ namespace api_test.Services
             var user = new User
             {
                 Username = request.Username,
-                RoleId = request.RoleId
+                RoleId = 2
             };
 
             var passwordHasher = new PasswordHasher<User>();
@@ -43,24 +43,21 @@ namespace api_test.Services
 
         public async Task<string?> LoginAsync(UserDto request)
         {
-            // أضف .Include(u => u.Role) هنا
+            // بنجيب اليوزر بالاسم بس + الـ Include عشان الرول
             var user = await _context.Users
                 .Include(u => u.Role)
                 .FirstOrDefaultAsync(u => u.Username == request.Username);
 
-            if (user is null)
-                return null;
+            if (user is null) return null;
 
             var passwordHasher = new PasswordHasher<User>();
             var result = passwordHasher.VerifyHashedPassword(user, user.PasswordHash, request.Password);
 
-            if (result == PasswordVerificationResult.Failed)
-                return null;
+            if (result == PasswordVerificationResult.Failed) return null;
 
-            // الآن user.Role مش هتبقى null والتوكن هيتكريه بنجاح
+            // بنكريت التوكن باليوزر اللي لقيناه (وهو أصلاً متخزن برول معينة في الداتا بيز)
             return CreateToken(user);
         }
-
         public async Task<User?> GetUserByUsernameAsync(string username)
         {
             return await _context.Users.FirstOrDefaultAsync(u => u.Username == username);

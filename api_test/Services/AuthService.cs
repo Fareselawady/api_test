@@ -28,7 +28,8 @@ namespace api_test.Services
 
             var user = new User
             {
-                Username = request.Username
+                Username = request.Username,
+                RoleId = request.RoleId
             };
 
             var passwordHasher = new PasswordHasher<User>();
@@ -36,21 +37,27 @@ namespace api_test.Services
 
             _context.Users.Add(user);
             await _context.SaveChangesAsync();
-
+            await _context.Entry(user).Reference(u => u.Role).LoadAsync();
             return user;
         }
 
         public async Task<string?> LoginAsync(UserDto request)
         {
-            var user = await _context.Users.FirstOrDefaultAsync(u => u.Username == request.Username);
+            // أضف .Include(u => u.Role) هنا
+            var user = await _context.Users
+                .Include(u => u.Role)
+                .FirstOrDefaultAsync(u => u.Username == request.Username);
+
             if (user is null)
                 return null;
 
             var passwordHasher = new PasswordHasher<User>();
             var result = passwordHasher.VerifyHashedPassword(user, user.PasswordHash, request.Password);
+
             if (result == PasswordVerificationResult.Failed)
                 return null;
 
+            // الآن user.Role مش هتبقى null والتوكن هيتكريه بنجاح
             return CreateToken(user);
         }
 
@@ -64,7 +71,8 @@ namespace api_test.Services
             var claims = new List<Claim>
             {
                 new Claim(ClaimTypes.Name, user.Username),
-                new Claim(ClaimTypes.NameIdentifier, user.Id.ToString())
+                new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()),
+                new Claim(ClaimTypes.Role, user.Role.RoleName.ToString())
             };
 
             var key = new SymmetricSecurityKey(

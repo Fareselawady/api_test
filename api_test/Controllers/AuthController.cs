@@ -4,6 +4,7 @@ using api_test.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using api_test.Data;
+using Microsoft.AspNetCore.Authorization;
 
 namespace api_test.Controllers
 {
@@ -69,5 +70,19 @@ namespace api_test.Controllers
                 myDrugs = drugs
             });
         }
+        [Authorize]
+        [HttpGet("me")]
+        public IActionResult AuthenticatedUser()
+        {
+            return Ok(new { message = "You are authenticated" });
+        }
+
+        [Authorize(Roles = "Admin")]
+        [HttpGet("admin-only")]
+        public IActionResult AdminOnly()
+        {
+            return Ok(new { message = "Welcome, Admin!" });
+        }
+
     }
 }

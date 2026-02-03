@@ -15,19 +15,16 @@ namespace api_test
         {
             var builder = WebApplication.CreateBuilder(args);
 
-            // Controllers
             builder.Services.AddControllers();
             builder.Services.AddEndpointsApiExplorer();
 
-            // OpenAPI (»œÌ· Swagger)
             builder.Services.AddOpenApi();
 
             // DbContext
             builder.Services.AddDbContext<AppDbContext>(options =>
-                options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection"))
-            );
+              options.UseSqlServer( builder.Configuration.GetConnectionString("DefaultConnection")));
 
-            // JWT
+
             var key = Encoding.UTF8.GetBytes(builder.Configuration["AppSettings:Token"]!);
 
             builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
@@ -52,7 +49,6 @@ namespace api_test
 
             app.UseMiddleware<VisitorLoggingMiddleware>();
 
-            // OpenAPI + Scalar
             app.MapOpenApi();            // /openapi/v1.json
             app.MapScalarApiReference(); // /scalar
 

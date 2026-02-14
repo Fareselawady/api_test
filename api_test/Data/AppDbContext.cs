@@ -16,26 +16,50 @@ namespace api_test.Data
         public DbSet<Role> Roles { get; set; }
         public DbSet<User> Users { get; set; }
         public DbSet<Drug> Drugs { get; set; }
-
+        public DbSet<Medication> Medications { get; set; }
+        public DbSet<Ingredient> Ingredients { get; set; }
+        public DbSet<MedIngredientLink> Med_Ingredients_Link { get; set; }
+        public DbSet<DrugInteraction> Drug_Interactions { get; set; }
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             base.OnModelCreating(modelBuilder);
 
-            // علاقة المستخدم بالأدوية
+            modelBuilder.Entity<MedIngredientLink>()
+            .HasOne(m => m.Medication)
+            .WithMany(d => d.Ingredients)
+            .HasForeignKey(m => m.Med_id);
+
+            modelBuilder.Entity<MedIngredientLink>()
+                .HasOne(m => m.Ingredient)
+                .WithMany(i => i.MedLinks)
+                .HasForeignKey(m => m.Ingredient_id);
+
+            modelBuilder.Entity<DrugInteraction>()
+                .HasOne(d => d.Ingredient1)
+                .WithMany()
+                .HasForeignKey(d => d.Ingredient_1_id)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<DrugInteraction>()
+                .HasOne(d => d.Ingredient2)
+                .WithMany()
+                .HasForeignKey(d => d.Ingredient_2_id)
+                .OnDelete(DeleteBehavior.Restrict);
+
             modelBuilder.Entity<User>()
                .HasMany(u => u.Drugs)
                .WithOne(d => d.User)
                .HasForeignKey(d => d.UserId)
                .OnDelete(DeleteBehavior.Cascade);
 
-            // علاقة المستخدم بالدور
+            
             modelBuilder.Entity<User>()
                 .HasOne(u => u.Role)
                 .WithMany(r => r.Users)
                 .HasForeignKey(u => u.RoleId)
                 .OnDelete(DeleteBehavior.Restrict);
 
-            // بيانات الأدوار الأولية
+          
             modelBuilder.Entity<Role>().HasData(
                 new Role { RoleId = 1, RoleName = "Admin" },
                 new Role { RoleId = 2, RoleName = "Patient" }

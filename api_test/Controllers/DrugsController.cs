@@ -11,84 +11,135 @@ namespace api_test.Controllers
     [Route("api/[controller]")]
     [ApiController]
     [Authorize]
-    public class DrugsController : ControllerBase
+    public class UserMedicationsController : ControllerBase
     {
         private readonly AppDbContext _context;
 
-        public DrugsController(AppDbContext context)
+        public UserMedicationsController(AppDbContext context)
         {
             _context = context;
         }
 
+        // ================= CREATE =================
         [HttpPost]
-        public async Task<ActionResult> AddDrug(CreateDrugDto dto)
+        public async Task<ActionResult> AddUserMedication(CreateUserMedicationDto dto)
         {
-            var userId = int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
+            var userId = GetUserId();
 
-            var drug = new Drug
+            var userMed = new UserMedication
             {
-                Name = dto.Name,
-                Description = dto.Description,
-                Type = dto.Type,
-                ExpirationDate = dto.ExpirationDate,
-                ProductDate = dto.ProductDate,
-                UserId = userId
+                UserId = userId,
+                MedId = dto.MedId,
+                Dosage = dto.Dosage,
+                Notes = dto.Notes,
+                StartDate = dto.StartDate,
+                EndDate = dto.EndDate,
+                ExpiryDate = dto.ExpiryDate,
+                CurrentPillCount = dto.CurrentPillCount,
+                InitialPillCount = dto.InitialPillCount,
+                LowStockThreshold = dto.LowStockThreshold,
+                DosesPerPeriod = dto.DosesPerPeriod,
+                PeriodUnit = dto.PeriodUnit,
+                PeriodValue = dto.PeriodValue,
+                FirstDoseTime = dto.FirstDoseTime,
+                IntervalHours = dto.IntervalHours,
+                NotificationActive = dto.NotificationActive
             };
 
-            _context.Drugs.Add(drug);
+            _context.UserMedications.Add(userMed);
             await _context.SaveChangesAsync();
 
-            return Ok("Drug added successfully");
+            return Ok("UserMedication added successfully");
         }
 
-        [HttpGet("mydrugs")]
-        public async Task<ActionResult> GetMyDrugs()
+        // ================= READ =================
+        [HttpGet("myusermeds")]
+        public async Task<ActionResult> GetMyUserMedications()
         {
-            var userId = int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
+            var userId = GetUserId();
 
-            var drugs = await _context.Drugs
-                .Where(d => d.UserId == userId)
-                .Select(d => new DrugDto
+            var meds = await _context.UserMedications
+                .Include(um => um.Medication)
+                .Where(um => um.UserId == userId)
+                .Select(um => new UserMedicationDto
                 {
-                    Id = d.Id,
-                    Name = d.Name,
-                    Description = d.Description,
-                    Type = d.Type,
-                    ExpirationDate = d.ExpirationDate,
-                    ProductDate = d.ProductDate
+                    Id = um.Id,
+                    MedId = um.MedId,
+                    MedName = um.Medication.Trade_name,
+                    Dosage = um.Dosage,
+                    Notes = um.Notes,
+                    StartDate = um.StartDate,
+                    EndDate = um.EndDate,
+                    ExpiryDate = um.ExpiryDate,
+                    CurrentPillCount = um.CurrentPillCount,
+                    InitialPillCount = um.InitialPillCount,
+                    LowStockThreshold = um.LowStockThreshold,
+                    DosesPerPeriod = um.DosesPerPeriod,
+                    PeriodUnit = um.PeriodUnit,
+                    PeriodValue = um.PeriodValue,
+                    FirstDoseTime = um.FirstDoseTime,
+                    IntervalHours = um.IntervalHours,
+                    NotificationActive = um.NotificationActive
                 })
                 .ToListAsync();
 
-            return Ok(drugs);
+            return Ok(meds);
         }
 
-        [HttpDelete]
-        public async Task<ActionResult> DeleteDrug(int drugId)
+        // ================= UPDATE =================
+        [HttpPut("{id}")]
+        public async Task<ActionResult> UpdateUserMedication(int id, CreateUserMedicationDto dto)
         {
-            var userId = int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
-            var drug = await _context.Drugs
-                .FirstOrDefaultAsync(d => d.Id == drugId && d.UserId == userId);
-            if (drug == null)
-                return NotFound("Drug not found");
-            _context.Drugs.Remove(drug);
+            var userId = GetUserId();
+            var userMed = await _context.UserMedications
+                .FirstOrDefaultAsync(um => um.Id == id && um.UserId == userId);
+
+            if (userMed == null) return NotFound("UserMedication not found");
+
+            userMed.MedId = dto.MedId;
+            userMed.Dosage = dto.Dosage;
+            userMed.Notes = dto.Notes;
+            userMed.StartDate = dto.StartDate;
+            userMed.EndDate = dto.EndDate;
+            userMed.ExpiryDate = dto.ExpiryDate;
+            userMed.CurrentPillCount = dto.CurrentPillCount;
+            userMed.InitialPillCount = dto.InitialPillCount;
+            userMed.LowStockThreshold = dto.LowStockThreshold;
+            userMed.DosesPerPeriod = dto.DosesPerPeriod;
+            userMed.PeriodUnit = dto.PeriodUnit;
+            userMed.PeriodValue = dto.PeriodValue;
+            userMed.FirstDoseTime = dto.FirstDoseTime;
+            userMed.IntervalHours = dto.IntervalHours;
+            userMed.NotificationActive = dto.NotificationActive;
+
             await _context.SaveChangesAsync();
-            return Ok("Drug deleted successfully");
+            return Ok("UserMedication updated successfully");
         }
-        [HttpPut]
-        public async Task<ActionResult> UpdateDrug(int drugId, CreateDrugDto dto)
+
+        // ================= DELETE =================
+        [HttpDelete("{id}")]
+        public async Task<ActionResult> DeleteUserMedication(int id)
         {
-            var userId = int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
-            var drug = await _context.Drugs
-                .FirstOrDefaultAsync(d => d.Id == drugId && d.UserId == userId);
-            if (drug == null)
-                return NotFound("Drug not found");
-            drug.Name = dto.Name;
-            drug.Description = dto.Description;
-            drug.Type = dto.Type;
-            drug.ExpirationDate = dto.ExpirationDate;
-            drug.ProductDate = dto.ProductDate;
+            var userId = GetUserId();
+            var userMed = await _context.UserMedications
+                .FirstOrDefaultAsync(um => um.Id == id && um.UserId == userId);
+
+            if (userMed == null) return NotFound("UserMedication not found");
+
+            _context.UserMedications.Remove(userMed);
             await _context.SaveChangesAsync();
-            return Ok("Drug updated successfully");
+
+            return Ok("UserMedication deleted successfully");
+        }
+
+        // ================= HELPERS =================
+        private int GetUserId()
+        {
+            var claim = User.FindFirst(ClaimTypes.NameIdentifier);
+            if (claim == null) throw new UnauthorizedAccessException();
+            return int.Parse(claim.Value);
         }
     }
+
+    
 }

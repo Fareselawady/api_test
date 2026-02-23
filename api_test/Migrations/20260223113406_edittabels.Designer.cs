@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using api_test.Data;
 
@@ -11,9 +12,11 @@ using api_test.Data;
 namespace api_test.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260223113406_edittabels")]
+    partial class edittabels
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -22,7 +25,7 @@ namespace api_test.Migrations
 
             SqlServerModelBuilderExtensions.UseIdentityColumns(modelBuilder);
 
-            modelBuilder.Entity("api_test.Entities.Alert", b =>
+            modelBuilder.Entity("api_test.Entities.Drug", b =>
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
@@ -30,39 +33,32 @@ namespace api_test.Migrations
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
 
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<bool>("IsRead")
-                        .HasColumnType("bit");
-
-                    b.Property<int?>("MedicationScheduleId")
-                        .HasColumnType("int");
-
-                    b.Property<string>("Message")
+                    b.Property<string>("Description")
+                        .IsRequired()
                         .HasColumnType("nvarchar(max)");
 
-                    b.Property<string>("Title")
+                    b.Property<DateOnly>("ExpirationDate")
+                        .HasColumnType("date");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
                         .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateOnly>("ProductDate")
+                        .HasColumnType("date");
 
                     b.Property<string>("Type")
+                        .IsRequired()
                         .HasColumnType("nvarchar(max)");
 
                     b.Property<int>("UserId")
                         .HasColumnType("int");
 
-                    b.Property<int?>("UserMedicationId")
-                        .HasColumnType("int");
-
                     b.HasKey("Id");
-
-                    b.HasIndex("MedicationScheduleId");
 
                     b.HasIndex("UserId");
 
-                    b.HasIndex("UserMedicationId");
-
-                    b.ToTable("Alerts");
+                    b.ToTable("Drugs");
                 });
 
             modelBuilder.Entity("api_test.Entities.DrugInteraction", b =>
@@ -168,51 +164,6 @@ namespace api_test.Migrations
                     b.ToTable("Medications");
                 });
 
-            modelBuilder.Entity("api_test.Entities.MedicationSchedule", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("int");
-
-                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("Notes")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<DateTime?>("NotificationTime")
-                        .HasColumnType("datetime2");
-
-                    b.Property<bool>("ReminderSent")
-                        .HasColumnType("bit");
-
-                    b.Property<DateTime>("ScheduledAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<int>("SnoozeCount")
-                        .HasColumnType("int");
-
-                    b.Property<DateTime?>("SnoozedUntil")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("Status")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<DateTime?>("TakenAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<int>("UserMedicationId")
-                        .HasColumnType("int");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("UserMedicationId");
-
-                    b.ToTable("MedicationSchedules");
-                });
-
             modelBuilder.Entity("api_test.Entities.Role", b =>
                 {
                     b.Property<int>("RoleId")
@@ -250,29 +201,7 @@ namespace api_test.Migrations
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
 
-                    b.Property<DateTime?>("BirthDate")
-                        .HasColumnType("datetime2");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("Email")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<string>("Gender")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<string>("Name")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(max)");
-
                     b.Property<string>("PasswordHash")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<string>("Phone")
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
 
@@ -288,74 +217,6 @@ namespace api_test.Migrations
                     b.HasIndex("RoleId");
 
                     b.ToTable("Users");
-                });
-
-            modelBuilder.Entity("api_test.Entities.UserMedication", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("int");
-
-                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<int?>("CurrentPillCount")
-                        .HasColumnType("int");
-
-                    b.Property<string>("Dosage")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<int?>("DosesPerPeriod")
-                        .HasColumnType("int");
-
-                    b.Property<DateOnly?>("EndDate")
-                        .HasColumnType("date");
-
-                    b.Property<DateOnly?>("ExpiryDate")
-                        .HasColumnType("date");
-
-                    b.Property<TimeOnly?>("FirstDoseTime")
-                        .HasColumnType("time");
-
-                    b.Property<int?>("InitialPillCount")
-                        .HasColumnType("int");
-
-                    b.Property<int?>("IntervalHours")
-                        .HasColumnType("int");
-
-                    b.Property<int?>("LowStockThreshold")
-                        .HasColumnType("int");
-
-                    b.Property<int>("MedId")
-                        .HasColumnType("int");
-
-                    b.Property<string>("Notes")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<bool>("NotificationActive")
-                        .HasColumnType("bit");
-
-                    b.Property<string>("PeriodUnit")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<int?>("PeriodValue")
-                        .HasColumnType("int");
-
-                    b.Property<DateOnly?>("StartDate")
-                        .HasColumnType("date");
-
-                    b.Property<int>("UserId")
-                        .HasColumnType("int");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("MedId");
-
-                    b.HasIndex("UserId");
-
-                    b.ToTable("UserMedications");
                 });
 
             modelBuilder.Entity("api_test.Models.VisitorLog", b =>
@@ -382,29 +243,15 @@ namespace api_test.Migrations
                     b.ToTable("VisitorLogs");
                 });
 
-            modelBuilder.Entity("api_test.Entities.Alert", b =>
+            modelBuilder.Entity("api_test.Entities.Drug", b =>
                 {
-                    b.HasOne("api_test.Entities.MedicationSchedule", "MedicationSchedule")
-                        .WithMany("Alerts")
-                        .HasForeignKey("MedicationScheduleId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
                     b.HasOne("api_test.Entities.User", "User")
-                        .WithMany("Alerts")
+                        .WithMany("Drugs")
                         .HasForeignKey("UserId")
-                        .OnDelete(DeleteBehavior.Restrict)
+                        .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
-                    b.HasOne("api_test.Entities.UserMedication", "UserMedication")
-                        .WithMany("Alerts")
-                        .HasForeignKey("UserMedicationId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.Navigation("MedicationSchedule");
-
                     b.Navigation("User");
-
-                    b.Navigation("UserMedication");
                 });
 
             modelBuilder.Entity("api_test.Entities.DrugInteraction", b =>
@@ -443,17 +290,6 @@ namespace api_test.Migrations
                     b.Navigation("Medication");
                 });
 
-            modelBuilder.Entity("api_test.Entities.MedicationSchedule", b =>
-                {
-                    b.HasOne("api_test.Entities.UserMedication", "UserMedication")
-                        .WithMany("Schedules")
-                        .HasForeignKey("UserMedicationId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("UserMedication");
-                });
-
             modelBuilder.Entity("api_test.Entities.User", b =>
                 {
                     b.HasOne("api_test.Entities.Role", "Role")
@@ -465,25 +301,6 @@ namespace api_test.Migrations
                     b.Navigation("Role");
                 });
 
-            modelBuilder.Entity("api_test.Entities.UserMedication", b =>
-                {
-                    b.HasOne("api_test.Entities.Medication", "Medication")
-                        .WithMany("UserMedications")
-                        .HasForeignKey("MedId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("api_test.Entities.User", "User")
-                        .WithMany("UserMedications")
-                        .HasForeignKey("UserId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Medication");
-
-                    b.Navigation("User");
-                });
-
             modelBuilder.Entity("api_test.Entities.Ingredient", b =>
                 {
                     b.Navigation("MedLinks");
@@ -492,13 +309,6 @@ namespace api_test.Migrations
             modelBuilder.Entity("api_test.Entities.Medication", b =>
                 {
                     b.Navigation("Ingredients");
-
-                    b.Navigation("UserMedications");
-                });
-
-            modelBuilder.Entity("api_test.Entities.MedicationSchedule", b =>
-                {
-                    b.Navigation("Alerts");
                 });
 
             modelBuilder.Entity("api_test.Entities.Role", b =>
@@ -508,16 +318,7 @@ namespace api_test.Migrations
 
             modelBuilder.Entity("api_test.Entities.User", b =>
                 {
-                    b.Navigation("Alerts");
-
-                    b.Navigation("UserMedications");
-                });
-
-            modelBuilder.Entity("api_test.Entities.UserMedication", b =>
-                {
-                    b.Navigation("Alerts");
-
-                    b.Navigation("Schedules");
+                    b.Navigation("Drugs");
                 });
 #pragma warning restore 612, 618
         }

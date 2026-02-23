@@ -12,10 +12,11 @@ namespace api_test.Data
         }
 
         public DbSet<VisitorLog> VisitorLogs { get; set; }
-
+        public DbSet<MedicationSchedule> MedicationSchedules { get; set; }
+        public DbSet<Alert> Alerts { get; set; }
         public DbSet<Role> Roles { get; set; }
-        public DbSet<User> Users { get; set; }
-        public DbSet<Drug> Drugs { get; set; }
+        public DbSet<User> Users { get; set; }  
+        public DbSet<UserMedication> UserMedications { get; set; }
         public DbSet<Medication> Medications { get; set; }
         public DbSet<Ingredient> Ingredients { get; set; }
         public DbSet<MedIngredientLink> Med_Ingredients_Link { get; set; }
@@ -47,7 +48,7 @@ namespace api_test.Data
                 .OnDelete(DeleteBehavior.Restrict);
 
             modelBuilder.Entity<User>()
-               .HasMany(u => u.Drugs)
+               .HasMany(u => u.UserMedications)
                .WithOne(d => d.User)
                .HasForeignKey(d => d.UserId)
                .OnDelete(DeleteBehavior.Cascade);
@@ -64,6 +65,30 @@ namespace api_test.Data
                 new Role { RoleId = 1, RoleName = "Admin" },
                 new Role { RoleId = 2, RoleName = "Patient" }
             );
+
+            modelBuilder.Entity<Alert>()
+             .HasOne(a => a.User)
+             .WithMany(u => u.Alerts)
+            .HasForeignKey(a => a.UserId)
+           .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<Alert>()
+                .HasOne(a => a.UserMedication)
+                .WithMany(m => m.Alerts)
+                .HasForeignKey(a => a.UserMedicationId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<Alert>()
+                .HasOne(a => a.MedicationSchedule)
+                .WithMany(s => s.Alerts)
+                .HasForeignKey(a => a.MedicationScheduleId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<UserMedication>()
+    .HasOne(um => um.Medication)
+    .WithMany(m => m.UserMedications)
+    .HasForeignKey(um => um.MedId) 
+    .OnDelete(DeleteBehavior.Cascade);
         }
 
         }

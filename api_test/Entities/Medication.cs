@@ -9,5 +9,7 @@
         public string? image_url { get; set; }
 
         public ICollection<MedIngredientLink>? Ingredients { get; set; }
+        public ICollection<UserMedication>? UserMedications { get; set; } = new List<UserMedication>();
+
     }
 }

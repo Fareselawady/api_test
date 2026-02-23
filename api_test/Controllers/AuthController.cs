@@ -49,25 +49,37 @@ namespace api_test.Controllers
             if (user == null)
                 return NotFound(new { message = "User not found" });
 
-            var drugs = await _context.Drugs
-                .Where(d => d.UserId == user.Id)
-                .Select(d => new DrugDto
-                {
-                    Id = d.Id,
-                    Name = d.Name,
-                    Description = d.Description,
-                    Type = d.Type,
-                    ExpirationDate = d.ExpirationDate,
-                    ProductDate = d.ProductDate
-                })
-                .ToListAsync();
+            var userMeds = await _context.UserMedications
+          .Include(um => um.Medication)
+          .Where(um => um.UserId == user.Id)
+          .Select(um => new
+          {
+              um.Id,
+              MedId = um.MedId,
+              MedName = um.Medication.Trade_name,
+              um.Dosage,
+              um.Notes,
+              um.StartDate,
+              um.EndDate,
+              um.ExpiryDate,
+              um.CurrentPillCount,
+              um.InitialPillCount,
+              um.LowStockThreshold,
+              um.DosesPerPeriod,
+              um.PeriodUnit,
+              um.PeriodValue,
+              um.FirstDoseTime,
+              um.IntervalHours,
+              um.NotificationActive
+          })
+                  .ToListAsync();
 
             return Ok(new
             {
                 message = $"Welcome {user.Username}",
                 token,
                 user = new { user.Id, user.Username },
-                myDrugs = drugs
+                myDrugs = userMeds
             });
         }
         [Authorize]

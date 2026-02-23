@@ -21,7 +21,24 @@ namespace api_test.Controllers
         [HttpGet("All Meds")]
         public async Task<ActionResult> GetMedications()
         {
-            var medications = await _context.Medications.ToListAsync();
+            var medications = await _context.Medications
+     .Select(m => new
+     {
+         m.ID,
+         m.Trade_name,
+         m.Description,
+         m.Dosage_Form,
+         m.image_url,
+
+         Ingredients = m.Ingredients!
+             .Select(i => new {
+                 i.Ingredient.IngredientName,
+                 i.Strength_value,
+                 i.Strength_unit
+             })
+     })
+     .ToListAsync();
+
             return Ok(medications);
         }
     }

@@ -15,16 +15,29 @@ namespace api_test
         {
             var builder = WebApplication.CreateBuilder(args);
 
+            // Controllers
             builder.Services.AddControllers();
             builder.Services.AddEndpointsApiExplorer();
-
             builder.Services.AddOpenApi();
 
+            // ======================
             // DbContext
+            // ======================
             builder.Services.AddDbContext<AppDbContext>(options =>
-              options.UseSqlServer( builder.Configuration.GetConnectionString("DefaultConnection")));
+                options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
 
+          
+            builder.Services.AddCors(options =>
+            {
+                options.AddPolicy("AllowAll", policy =>
+                {
+                    policy.AllowAnyOrigin()
+                          .AllowAnyMethod()
+                          .AllowAnyHeader();
+                });
+            });
 
+           
             var key = Encoding.UTF8.GetBytes(builder.Configuration["AppSettings:Token"]!);
 
             builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
@@ -43,20 +56,30 @@ namespace api_test
                 });
 
             builder.Services.AddAuthorization();
+
             builder.Services.AddScoped<IAuthService, AuthService>();
 
             var app = builder.Build();
 
+          
+
+            app.UseDeveloperExceptionPage(); // ›ﬁÿ √À‰«¡ «· ÿÊÌ—
+
             app.UseMiddleware<VisitorLoggingMiddleware>();
 
-            app.MapOpenApi();            // /openapi/v1.json
-            app.MapScalarApiReference(); // /scalar
+            app.UseHttpsRedirection(); // „—… Ê«Õœ… ›ﬁÿ
 
-            app.UseHttpsRedirection();
+            app.UseCors("AllowAll");   // ? ﬁ»· Authentication
+
             app.UseAuthentication();
             app.UseAuthorization();
 
+            // OpenAPI + Scalar
+            app.MapOpenApi();            // /openapi/v1.json
+            app.MapScalarApiReference(); // /scalar
+
             app.MapControllers();
+
             app.Run();
         }
     }

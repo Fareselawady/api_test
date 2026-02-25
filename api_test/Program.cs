@@ -58,6 +58,8 @@ namespace api_test
             builder.Services.AddAuthorization();
 
             builder.Services.AddScoped<IAuthService, AuthService>();
+            builder.Services.AddScoped<EmailService>();
+            builder.Services.AddScoped<OtpService>();
 
             var app = builder.Build();
 

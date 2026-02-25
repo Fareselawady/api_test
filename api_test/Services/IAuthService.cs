@@ -5,10 +5,18 @@ namespace api_test.Services
 {
     public interface IAuthService
     {
-        Task<User?> RegisterAsync(UserDto request);
+       
+            // Register: بس يولد OTP ويرجع نجاح/فشل
+            Task<bool> RegisterAsync(UserDto request);
 
-        Task<string?> LoginAsync(UserDto request);
+            // VerifyOtp: بعد ما يدخل OTP صح، يتم تسجيله رسميًا ويرجع JWT
+            Task<string?> VerifyOtpAsync(string email, string otp);
 
-        Task<User?> GetUserByUsernameAsync(string username);
-    }
+            // Login: زي القديم
+            Task<string?> LoginAsync(UserDto request);
+
+            // Get user by email: زي القديم
+            Task<User?> GetUserByEmailAsync(string email);
+        }
+    
 }

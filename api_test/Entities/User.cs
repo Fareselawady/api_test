@@ -15,7 +15,12 @@ namespace api_test.Entities
         public string Username { get; set; } = string.Empty;
         public string PasswordHash { get; set; } = string.Empty;
 
+        //================= EMAIL VERIFICATION =================
+        public bool IsEmailVerified { get; set; } = false;
+        public string? EmailOtp { get; set; }
+        public DateTime? OtpExpiry { get; set; }
 
+        //================= End  VERIFICATION =================
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
         public int RoleId { get; set; } // لازم يكون موجود عشان الـ ForeignKey

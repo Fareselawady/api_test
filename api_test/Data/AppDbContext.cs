@@ -28,12 +28,14 @@ namespace api_test.Data
             modelBuilder.Entity<MedIngredientLink>()
             .HasOne(m => m.Medication)
             .WithMany(d => d.Ingredients)
-            .HasForeignKey(m => m.Med_id);
+            .HasForeignKey(m => m.Med_id)
+            .OnDelete(DeleteBehavior.Cascade);
 
             modelBuilder.Entity<MedIngredientLink>()
                 .HasOne(m => m.Ingredient)
                 .WithMany(i => i.MedLinks)
-                .HasForeignKey(m => m.Ingredient_id);
+                .HasForeignKey(m => m.Ingredient_id)
+                .OnDelete(DeleteBehavior.Cascade);
 
             modelBuilder.Entity<DrugInteraction>()
                 .HasOne(d => d.Ingredient1)
@@ -82,13 +84,26 @@ namespace api_test.Data
                 .HasOne(a => a.MedicationSchedule)
                 .WithMany(s => s.Alerts)
                 .HasForeignKey(a => a.MedicationScheduleId)
-                .OnDelete(DeleteBehavior.Restrict);
+                .OnDelete(DeleteBehavior.Cascade);
 
             modelBuilder.Entity<UserMedication>()
     .HasOne(um => um.Medication)
     .WithMany(m => m.UserMedications)
     .HasForeignKey(um => um.MedId) 
     .OnDelete(DeleteBehavior.Cascade);
+
+
+            modelBuilder.Entity<MedicationSchedule>()
+                .HasOne(ms => ms.UserMedication)
+                .WithMany(um => um.MedicationSchedules)
+                .HasForeignKey(ms => ms.UserMedicationId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            modelBuilder.Entity<Alert>()
+                .HasOne(a => a.MedicationSchedule)
+                .WithMany(ms => ms.Alerts)
+                .HasForeignKey(a => a.MedicationScheduleId)
+                .OnDelete(DeleteBehavior.Cascade);
         }
 
         }

@@ -31,7 +31,7 @@
         public bool NotificationActive { get; set; } = true;
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
-        public ICollection<MedicationSchedule> Schedules { get; set; } = new List<MedicationSchedule>();
+        public ICollection<MedicationSchedule> MedicationSchedules { get; set; } = new List<MedicationSchedule>();
         public ICollection<Alert> Alerts { get; set; } = new List<Alert>();
     }
 }

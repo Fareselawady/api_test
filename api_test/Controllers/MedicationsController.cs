@@ -41,5 +41,46 @@ namespace api_test.Controllers
 
             return Ok(medications);
         }
+
+        [Authorize]
+        [HttpGet("check-interaction")]
+        public async Task<IActionResult> CheckDrugInteraction(int med1Id, int med2Id)
+        {
+            var med1Ingredients = await _context.Med_Ingredients_Link
+                .Where(m => m.Med_id == med1Id)
+                .Select(m => m.Ingredient_id)
+                .ToListAsync();
+
+            var med2Ingredients = await _context.Med_Ingredients_Link
+                .Where(m => m.Med_id == med2Id)
+                .Select(m => m.Ingredient_id)
+                .ToListAsync();
+
+            var interactions = await _context.Drug_Interactions
+                .Where(di =>
+                    (med1Ingredients.Contains(di.Ingredient_1_id!.Value) && med2Ingredients.Contains(di.Ingredient_2_id!.Value)) ||
+                    (med1Ingredients.Contains(di.Ingredient_2_id!.Value) && med2Ingredients.Contains(di.Ingredient_1_id!.Value))
+                )
+                .ToListAsync();
+
+            if (!interactions.Any())
+                return Ok(new { Message = "No interaction between these two medications." });
+
+            var med1 = await _context.Medications.FindAsync(med1Id);
+            var med2 = await _context.Medications.FindAsync(med2Id);
+
+            var interactionDetails = interactions.Select(i => new
+            {
+                i.Interaction_type,
+                Med1 = med1?.Trade_name,
+                Med2 = med2?.Trade_name
+            }).ToList();
+
+            return Ok(new
+            {
+                Message = "Interaction exists between these medications.",
+                Interactions = interactionDetails
+            });
+        }
     }
 }

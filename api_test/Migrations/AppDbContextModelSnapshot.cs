@@ -62,7 +62,7 @@ namespace api_test.Migrations
 
                     b.HasIndex("UserMedicationId");
 
-                    b.ToTable("Alerts");
+                    b.ToTable("Alerts", (string)null);
                 });
 
             modelBuilder.Entity("api_test.Entities.DrugInteraction", b =>
@@ -94,7 +94,7 @@ namespace api_test.Migrations
 
                     b.HasIndex("Ingredient_2_id");
 
-                    b.ToTable("Drug_Interactions");
+                    b.ToTable("Drug_Interactions", (string)null);
                 });
 
             modelBuilder.Entity("api_test.Entities.Ingredient", b =>
@@ -111,7 +111,7 @@ namespace api_test.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("Ingredients");
+                    b.ToTable("Ingredients", (string)null);
                 });
 
             modelBuilder.Entity("api_test.Entities.MedIngredientLink", b =>
@@ -140,7 +140,7 @@ namespace api_test.Migrations
 
                     b.HasIndex("Med_id");
 
-                    b.ToTable("Med_Ingredients_Link");
+                    b.ToTable("Med_Ingredients_Link", (string)null);
                 });
 
             modelBuilder.Entity("api_test.Entities.Medication", b =>
@@ -165,7 +165,7 @@ namespace api_test.Migrations
 
                     b.HasKey("ID");
 
-                    b.ToTable("Medications");
+                    b.ToTable("Medications", (string)null);
                 });
 
             modelBuilder.Entity("api_test.Entities.MedicationSchedule", b =>
@@ -210,7 +210,7 @@ namespace api_test.Migrations
 
                     b.HasIndex("UserMedicationId");
 
-                    b.ToTable("MedicationSchedules");
+                    b.ToTable("MedicationSchedules", (string)null);
                 });
 
             modelBuilder.Entity("api_test.Entities.Role", b =>
@@ -227,7 +227,7 @@ namespace api_test.Migrations
 
                     b.HasKey("RoleId");
 
-                    b.ToTable("Roles");
+                    b.ToTable("Roles", (string)null);
 
                     b.HasData(
                         new
@@ -296,7 +296,7 @@ namespace api_test.Migrations
 
                     b.HasIndex("RoleId");
 
-                    b.ToTable("Users");
+                    b.ToTable("Users", (string)null);
                 });
 
             modelBuilder.Entity("api_test.Entities.UserMedication", b =>
@@ -364,7 +364,7 @@ namespace api_test.Migrations
 
                     b.HasIndex("UserId");
 
-                    b.ToTable("UserMedications");
+                    b.ToTable("UserMedications", (string)null);
                 });
 
             modelBuilder.Entity("api_test.Models.VisitorLog", b =>
@@ -388,7 +388,7 @@ namespace api_test.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("VisitorLogs");
+                    b.ToTable("VisitorLogs", (string)null);
                 });
 
             modelBuilder.Entity("api_test.Entities.Alert", b =>

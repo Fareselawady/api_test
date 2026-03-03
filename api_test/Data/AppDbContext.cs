@@ -1,6 +1,7 @@
 ﻿using api_test.Entities;
 using api_test.Models;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using System;
 
 namespace api_test.Data
@@ -24,6 +25,36 @@ namespace api_test.Data
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             base.OnModelCreating(modelBuilder);
+
+            var dateOnlyConverter = new ValueConverter<DateOnly?, DateTime?>(
+                d => d == null ? null : d.Value.ToDateTime(TimeOnly.MinValue),
+                d => d == null ? null : DateOnly.FromDateTime(d.Value)
+            );
+
+            var timeOnlyConverter = new ValueConverter<TimeOnly?, TimeSpan?>(
+                t => t == null ? null : t.Value.ToTimeSpan(),
+                t => t == null ? null : TimeOnly.FromTimeSpan(t.Value)
+            );
+            modelBuilder.Entity<UserMedication>(entity =>
+            {
+                entity.Property(e => e.StartDate).HasConversion(dateOnlyConverter);
+                entity.Property(e => e.EndDate).HasConversion(dateOnlyConverter);
+                entity.Property(e => e.ExpiryDate).HasConversion(dateOnlyConverter);
+                entity.Property(e => e.FirstDoseTime).HasConversion(timeOnlyConverter);
+                entity.Property(e => e.IntervalHours).HasConversion(
+                    v => v == null ? (double?)null : (double)v.Value,
+                    v => v == null ? (int?)null : (int)v.Value
+                );
+            });
+
+            modelBuilder.Entity<MedicationSchedule>(entity =>
+            {
+                entity.Property(e => e.UserMedicationId).HasColumnName("UserMedId");
+                entity.Ignore(e => e.TakenAt);
+                entity.Ignore(e => e.SnoozedUntil);
+                entity.Ignore(e => e.Notes);
+                entity.Property(e => e.NotificationTime).IsRequired(false);
+            });
 
             modelBuilder.Entity<MedIngredientLink>()
             .HasOne(m => m.Medication)

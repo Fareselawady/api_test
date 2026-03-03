@@ -60,6 +60,7 @@ namespace api_test
             builder.Services.AddScoped<IAuthService, AuthService>();
             builder.Services.AddScoped<EmailService>();
             builder.Services.AddScoped<OtpService>();
+            builder.Services.AddScoped<IScheduleService, ScheduleService>();
 
             var app = builder.Build();
 

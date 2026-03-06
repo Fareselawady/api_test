@@ -1,4 +1,6 @@
 ﻿using api_test.Data;
+using api_test.Entities;
+using api_test.Models;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -41,18 +43,31 @@ namespace api_test.Controllers
 
             return Ok(medications);
         }
-
         [Authorize]
         [HttpGet("check-interaction")]
-        public async Task<IActionResult> CheckDrugInteraction(int med1Id, int med2Id)
+        public async Task<IActionResult> CheckDrugInteraction(string med1Name, string med2Name)
         {
+            // جيب الدوائين بالاسم
+            var med1 = await _context.Medications
+                .FirstOrDefaultAsync(m => m.Trade_name == med1Name);
+
+            var med2 = await _context.Medications
+                .FirstOrDefaultAsync(m => m.Trade_name == med2Name);
+
+            if (med1 == null)
+                return NotFound(new { Message = $"Medication '{med1Name}' not found." });
+
+            if (med2 == null)
+                return NotFound(new { Message = $"Medication '{med2Name}' not found." });
+
+            // جيب المواد الفعالة بالـ ID اللي جبناه
             var med1Ingredients = await _context.Med_Ingredients_Link
-                .Where(m => m.Med_id == med1Id)
+                .Where(m => m.Med_id == med1.ID)
                 .Select(m => m.Ingredient_id)
                 .ToListAsync();
 
             var med2Ingredients = await _context.Med_Ingredients_Link
-                .Where(m => m.Med_id == med2Id)
+                .Where(m => m.Med_id == med2.ID)
                 .Select(m => m.Ingredient_id)
                 .ToListAsync();
 
@@ -64,16 +79,13 @@ namespace api_test.Controllers
                 .ToListAsync();
 
             if (!interactions.Any())
-                return Ok(new { Message = "No interaction between these two medications." });
-
-            var med1 = await _context.Medications.FindAsync(med1Id);
-            var med2 = await _context.Medications.FindAsync(med2Id);
+                return Ok(new { Message = $"No interaction between '{med1Name}' and '{med2Name}'." });
 
             var interactionDetails = interactions.Select(i => new
             {
                 i.Interaction_type,
-                Med1 = med1?.Trade_name,
-                Med2 = med2?.Trade_name
+                Med1 = med1.Trade_name,
+                Med2 = med2.Trade_name
             }).ToList();
 
             return Ok(new
@@ -81,6 +93,51 @@ namespace api_test.Controllers
                 Message = "Interaction exists between these medications.",
                 Interactions = interactionDetails
             });
+        }
+
+        [Authorize(Roles = "Admin")]
+        [HttpPost("add")]
+        public async Task<IActionResult> AddMedication(CreateMedicationDto dto)
+        {
+            var exists = await _context.Medications
+                .AnyAsync(m => m.Trade_name == dto.TradeName);
+
+            if (exists)
+                return BadRequest(new { Message = "Medication with this name already exists." });
+
+            var medication = new Medication
+            {
+                Trade_name = dto.TradeName,
+                Description = dto.Description,
+                Dosage_Form = dto.DosageForm,
+                image_url = dto.ImageUrl
+            };
+
+            _context.Medications.Add(medication);
+            await _context.SaveChangesAsync();
+
+            return Ok(new
+            {
+                Message = "Medication added successfully.",
+                MedicationId = medication.ID,
+                MedicationName = medication.Trade_name
+            });
+        }
+
+        [Authorize(Roles = "Admin")]
+        [HttpDelete("delete/{id}")]
+        public async Task<IActionResult> DeleteMedication(int id)
+        {
+            var medication = await _context.Medications
+                .FirstOrDefaultAsync(m => m.ID == id);
+
+            if (medication == null)
+                return NotFound(new { Message = "Medication not found." });
+
+            _context.Medications.Remove(medication);
+            await _context.SaveChangesAsync();
+
+            return Ok(new { Message = $"Medication '{medication.Trade_name}' deleted successfully." });
         }
     }
 }

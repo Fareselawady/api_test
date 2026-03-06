@@ -29,10 +29,24 @@ namespace api_test.Controllers
         {
             var userId = GetUserId();
 
+            var medication = await _context.Medications
+                .FirstOrDefaultAsync(m => m.Trade_name == dto.MedicationName);
+
+            if (medication == null)
+                return NotFound(new { Message = $"Medication '{dto.MedicationName}' not found." });
+
+            var alreadyExists = await _context.UserMedications
+       .AnyAsync(um => um.UserId == userId && um.MedId == medication.ID);
+
+            if (alreadyExists)
+                return BadRequest(new { Message = $"You already have '{dto.MedicationName}' in your medications." });
+
+
+
             var userMed = new UserMedication
             {
                 UserId = userId,
-                MedId = dto.MedId,
+                MedId = medication.ID,
                 Dosage = dto.Dosage,
                 Notes = dto.Notes,
                 StartDate = dto.StartDate.HasValue ? DateOnly.FromDateTime(dto.StartDate.Value) : null,
@@ -48,14 +62,13 @@ namespace api_test.Controllers
                 IntervalHours = dto.IntervalHours,
                 NotificationActive = dto.NotificationActive
             };
+
             _context.UserMedications.Add(userMed);
             await _context.SaveChangesAsync();
+            await _scheduleService.GenerateScheduleAsync(userMed);
 
-            await _scheduleService.GenerateScheduleAsync(userMed); // ← أضيف ده
-
-            return Ok("UserMedication added successfully");
+            return Ok(new { Message = $"'{dto.MedicationName}' added to your medications successfully." });
         }
-
         // ================= READ =================
         [HttpGet("myusermeds")]
         public async Task<ActionResult> GetMyUserMedications()
@@ -95,11 +108,22 @@ namespace api_test.Controllers
         public async Task<ActionResult> UpdateUserMedication(int id, CreateUserMedicationDto dto)
         {
             var userId = GetUserId();
+
             var userMed = await _context.UserMedications
                 .FirstOrDefaultAsync(um => um.Id == id && um.UserId == userId);
 
-            if (userMed == null) return NotFound("UserMedication not found");
-            userMed.MedId = dto.MedId;
+            if (userMed == null)
+                return NotFound(new { Message = "UserMedication not found." });
+
+            // جيب الدواء بالاسم
+            var medication = await _context.Medications
+                .FirstOrDefaultAsync(m => m.Trade_name == dto.MedicationName);
+
+            if (medication == null)
+                return NotFound(new { Message = $"Medication '{dto.MedicationName}' not found." });
+
+
+            userMed.MedId = medication.ID;  // ← بدل dto.MedId
             userMed.Dosage = dto.Dosage;
             userMed.Notes = dto.Notes;
             userMed.StartDate = dto.StartDate.HasValue ? DateOnly.FromDateTime(dto.StartDate.Value) : null;
@@ -116,9 +140,8 @@ namespace api_test.Controllers
             userMed.NotificationActive = dto.NotificationActive;
 
             await _context.SaveChangesAsync();
-            return Ok("UserMedication updated successfully");
+            return Ok(new { Message = $"UserMedication updated successfully." });
         }
-
         // ================= DELETE =================
         [HttpDelete("{id}")]
         public async Task<ActionResult> DeleteUserMedication(int id)
@@ -142,7 +165,80 @@ namespace api_test.Controllers
             if (claim == null) throw new UnauthorizedAccessException();
             return int.Parse(claim.Value);
         }
+
+
+        //==============================add by OCR or with 2 steps ============================
+
+        [HttpPost("init")]
+        public async Task<ActionResult> InitUserMedication(InitUserMedicationDto dto)
+        {
+            var userId = GetUserId();
+
+            var medication = await _context.Medications
+                .FirstOrDefaultAsync(m => m.Trade_name == dto.MedicationName);
+
+            if (medication == null)
+                return NotFound(new { Message = $"Medication '{dto.MedicationName}' not found." });
+
+            var alreadyExists = await _context.UserMedications
+       .AnyAsync(um => um.UserId == userId && um.MedId == medication.ID);
+
+            if (alreadyExists)
+                return BadRequest(new { Message = $"You already have '{dto.MedicationName}' in your medications." });
+
+
+
+            var userMed = new UserMedication
+            {
+                UserId = userId,
+                MedId = medication.ID
+            };
+
+            _context.UserMedications.Add(userMed);
+            await _context.SaveChangesAsync();
+
+            return Ok(new
+            {
+                Message = "Medication selected successfully.",
+                UserMedicationId = userMed.Id,
+                MedicationName = medication.Trade_name
+            });
+        }
+
+        [HttpPut("{id}/details")]
+        public async Task<ActionResult> AddUserMedicationDetails(int id, UserMedicationDetailsDto dto)
+        {
+            var userId = GetUserId();
+
+            var userMed = await _context.UserMedications
+                .FirstOrDefaultAsync(um => um.Id == id && um.UserId == userId);
+
+            if (userMed == null)
+                return NotFound(new { Message = "UserMedication not found." });
+
+            userMed.Dosage = dto.Dosage;
+            userMed.Notes = dto.Notes;
+            userMed.StartDate = dto.StartDate.HasValue ? DateOnly.FromDateTime(dto.StartDate.Value) : null;
+            userMed.EndDate = dto.EndDate.HasValue ? DateOnly.FromDateTime(dto.EndDate.Value) : null;
+            userMed.ExpiryDate = dto.ExpiryDate.HasValue ? DateOnly.FromDateTime(dto.ExpiryDate.Value) : null;
+            userMed.CurrentPillCount = dto.CurrentPillCount;
+            userMed.InitialPillCount = dto.InitialPillCount;
+            userMed.LowStockThreshold = dto.LowStockThreshold;
+            userMed.DosesPerPeriod = dto.DosesPerPeriod;
+            userMed.PeriodUnit = dto.PeriodUnit;
+            userMed.PeriodValue = dto.PeriodValue;
+            userMed.FirstDoseTime = dto.FirstDoseTime.HasValue ? TimeOnly.FromTimeSpan(dto.FirstDoseTime.Value) : null;
+            userMed.IntervalHours = dto.IntervalHours;
+            userMed.NotificationActive = dto.NotificationActive;
+
+            await _context.SaveChangesAsync();
+            await _scheduleService.GenerateScheduleAsync(userMed);
+
+            return Ok(new { Message = "Medication details added successfully." });
+        }
+
+
     }
 
-    
+
 }

@@ -1,8 +1,7 @@
 ﻿namespace api_test.Models
 {
-    public class CreateUserMedicationDto
+    public class UserMedicationDetailsDto
     {
-        public string MedicationName { get; set; } = null!; // الوحيد الإجباري
         public string? Dosage { get; set; }
         public string? Notes { get; set; }
         public DateTime? StartDate { get; set; }

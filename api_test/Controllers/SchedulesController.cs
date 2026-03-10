@@ -8,10 +8,11 @@ namespace api_test.Controllers
 {
     /// <summary>
     /// Provides schedule and alert query endpoints:
-    ///   GET /api/medications/{userMedId}/schedules     → all schedules for a medication
-    ///   GET /api/users/{userId}/alerts                 → pending alerts for a user
-    ///   GET /api/users/{userId}/today-schedules        → today's schedules for a user
-    ///   PATCH /api/schedules/{scheduleId}/status       → mark Taken / Missed / Pending
+    ///   GET  /api/medications/{userMedId}/schedules        → all schedules for a medication
+    ///   GET  /api/users/{userId}/alerts                    → pending alerts for a user
+    ///   GET  /api/users/{userId}/today-schedules           → today's schedules for a user
+    ///   GET  /api/users/{userId}/schedules-by-date         → schedules for a specific date  ← NEW
+    ///   PATCH /api/schedules/{scheduleId}/status           → mark Taken / Missed / Pending
     /// </summary>
     [ApiController]
     [Authorize]
@@ -25,10 +26,6 @@ namespace api_test.Controllers
         }
 
         // ── GET /api/medications/{userMedId}/schedules ────────────────────────
-        /// <summary>
-        /// Returns every schedule entry for the specified UserMedication.
-        /// Only the authenticated user's own medications are accessible.
-        /// </summary>
         [HttpGet("api/medications/{userMedId:int}/schedules")]
         public async Task<ActionResult<List<MedicationScheduleDto>>> GetSchedulesForMedication(
             int userMedId)
@@ -43,10 +40,6 @@ namespace api_test.Controllers
         }
 
         // ── GET /api/users/{userId}/alerts ────────────────────────────────────
-        /// <summary>
-        /// Returns all unread (pending) alerts for a user.
-        /// Users can only access their own alerts.
-        /// </summary>
         [HttpGet("api/users/{userId:int}/alerts")]
         public async Task<ActionResult<List<AlertDto>>> GetUserAlerts(int userId)
         {
@@ -54,13 +47,10 @@ namespace api_test.Controllers
                 return Forbid();
 
             var alerts = await _scheduleService.GetPendingAlertsAsync(userId);
-            return Ok(alerts);   // empty list is fine — 200 with []
+            return Ok(alerts);
         }
 
         // ── GET /api/users/{userId}/today-schedules ───────────────────────────
-        /// <summary>
-        /// Returns all schedules whose ScheduledAt falls on today (UTC) for a user.
-        /// </summary>
         [HttpGet("api/users/{userId:int}/today-schedules")]
         public async Task<ActionResult<List<MedicationScheduleDto>>> GetTodaySchedules(int userId)
         {
@@ -71,11 +61,44 @@ namespace api_test.Controllers
             return Ok(schedules);
         }
 
-        // ── PATCH /api/schedules/{scheduleId}/status ──────────────────────────
+        // ── GET /api/users/{userId}/schedules-by-date ─────────────────────────
         /// <summary>
-        /// Updates the status of a schedule entry.
-        /// Accepted values: "Taken", "Missed", "Pending"
+        /// Returns all medication schedules for a user on a specific date.
+        /// Used by the mobile home screen week view when the user taps a day.
+        ///
+        /// Example request:
+        ///   GET /api/users/1/schedules-by-date?date=2026-03-12
+        ///
+        /// Rules:
+        ///   • The caller must be the owner of the resource (or an Admin).
+        ///   • date must be supplied in ISO 8601 format: yyyy-MM-dd
+        ///   • Returns 200 OK with [] when no schedules exist for that day.
+        ///   • Returns 400 Bad Request when date is missing or cannot be parsed.
         /// </summary>
+        [HttpGet("api/users/{userId:int}/schedules-by-date")]
+        public async Task<ActionResult<List<MedicationScheduleDto>>> GetSchedulesByDate(
+            int userId,
+            [FromQuery] string? date)   // received as string so we control the error message
+        {
+            // 1. Ownership check — same pattern as GetUserAlerts / GetTodaySchedules
+            if (!CallerOwnsResource(userId))
+                return Forbid();
+
+            // 2. Validate the date query parameter
+            if (string.IsNullOrWhiteSpace(date))
+                return BadRequest(new { message = "The 'date' query parameter is required. Example: ?date=2026-03-12" });
+
+            if (!DateOnly.TryParseExact(date, "yyyy-MM-dd", out var parsedDate))
+                return BadRequest(new { message = $"Invalid date format '{date}'. Use yyyy-MM-dd, e.g. 2026-03-12" });
+
+            // 3. Delegate to the service layer
+            var schedules = await _scheduleService.GetSchedulesByDateAsync(userId, parsedDate);
+
+            // 4. Always return 200 — empty list is a valid result (no doses that day)
+            return Ok(schedules);
+        }
+
+        // ── PATCH /api/schedules/{scheduleId}/status ──────────────────────────
         [HttpPatch("api/schedules/{scheduleId:int}/status")]
         public async Task<ActionResult> UpdateScheduleStatus(
             int scheduleId,
@@ -102,7 +125,7 @@ namespace api_test.Controllers
             return Ok(new { message = $"Schedule {scheduleId} marked as {dto.Status}." });
         }
 
-        // ── Helper ────────────────────────────────────────────────────────────
+        // ── Helpers ───────────────────────────────────────────────────────────
         private int GetUserId()
         {
             var claim = User.FindFirst(ClaimTypes.NameIdentifier)
@@ -111,8 +134,8 @@ namespace api_test.Controllers
         }
 
         /// <summary>
-        /// Ensures the authenticated user is the same as the userId in the route.
-        /// Admins bypass this check (they can see any user's data).
+        /// Ensures the authenticated user matches the userId in the route.
+        /// Admins bypass this check and can access any user's data.
         /// </summary>
         private bool CallerOwnsResource(int userId)
         {

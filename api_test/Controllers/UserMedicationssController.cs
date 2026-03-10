@@ -15,34 +15,40 @@ namespace api_test.Controllers
     public class UserMedicationsController : ControllerBase
     {
         private readonly AppDbContext _context;
-        private readonly IScheduleService _scheduleService; // ← أضيف ده
+        private readonly IScheduleService _scheduleService;
+        private readonly IInteractionService _interactionService; // ← NEW
 
-        public UserMedicationsController(AppDbContext context , IScheduleService scheduleService)
+        public UserMedicationsController(
+            AppDbContext context,
+            IScheduleService scheduleService,
+            IInteractionService interactionService) // ← NEW
         {
             _context = context;
-            _scheduleService = scheduleService; // ← أضيف ده
+            _scheduleService = scheduleService;
+            _interactionService = interactionService; // ← NEW
         }
 
-        // ================= CREATE =================
+        // ================= CREATE (single-step) =================
         [HttpPost]
         public async Task<ActionResult> AddUserMedication(CreateUserMedicationDto dto)
         {
             var userId = GetUserId();
 
+            // 1. Validate the medication exists
             var medication = await _context.Medications
                 .FirstOrDefaultAsync(m => m.Trade_name == dto.MedicationName);
 
             if (medication == null)
                 return NotFound(new { Message = $"Medication '{dto.MedicationName}' not found." });
 
+            // 2. Prevent duplicates
             var alreadyExists = await _context.UserMedications
-       .AnyAsync(um => um.UserId == userId && um.MedId == medication.ID);
+                .AnyAsync(um => um.UserId == userId && um.MedId == medication.ID);
 
             if (alreadyExists)
                 return BadRequest(new { Message = $"You already have '{dto.MedicationName}' in your medications." });
 
-
-
+            // 3. Save the new medication
             var userMed = new UserMedication
             {
                 UserId = userId,
@@ -67,8 +73,33 @@ namespace api_test.Controllers
             await _context.SaveChangesAsync();
             await _scheduleService.GenerateScheduleAsync(userMed);
 
-            return Ok(new { Message = $"'{dto.MedicationName}' added to your medications successfully." });
+            // 4. Check interactions AFTER saving — medication is always added regardless
+            //    Pass userId so the service only scans THIS user's medications,
+            //    and exclude the just-saved med (service skips same MedId internally).
+            var warnings = await _interactionService
+                .CheckInteractionsForNewMedAsync(userId, dto.MedicationName);
+
+            // 5. Build response — same shape whether warnings exist or not
+            if (warnings.Count == 0)
+            {
+                return Ok(new
+                {
+                    Message = $"'{dto.MedicationName}' added to your medications successfully."
+                });
+            }
+
+            return Ok(new
+            {
+                Message = $"'{dto.MedicationName}' added to your medications successfully.",
+                InteractionWarnings = warnings
+                // Example when warnings exist:
+                // "interactionWarnings": [
+                //   "Warning: 'Ibuprofen' may interact with 'Aspirin' (Major).",
+                //   "Warning: 'Ibuprofen' may interact with 'Warfarin' (Moderate)."
+                // ]
+            });
         }
+
         // ================= READ =================
         [HttpGet("myusermeds")]
         public async Task<ActionResult> GetMyUserMedications()
@@ -115,15 +146,13 @@ namespace api_test.Controllers
             if (userMed == null)
                 return NotFound(new { Message = "UserMedication not found." });
 
-            // جيب الدواء بالاسم
             var medication = await _context.Medications
                 .FirstOrDefaultAsync(m => m.Trade_name == dto.MedicationName);
 
             if (medication == null)
                 return NotFound(new { Message = $"Medication '{dto.MedicationName}' not found." });
 
-
-            userMed.MedId = medication.ID;  // ← بدل dto.MedId
+            userMed.MedId = medication.ID;
             userMed.Dosage = dto.Dosage;
             userMed.Notes = dto.Notes;
             userMed.StartDate = dto.StartDate.HasValue ? DateOnly.FromDateTime(dto.StartDate.Value) : null;
@@ -140,8 +169,9 @@ namespace api_test.Controllers
             userMed.NotificationActive = dto.NotificationActive;
 
             await _context.SaveChangesAsync();
-            return Ok(new { Message = $"UserMedication updated successfully." });
+            return Ok(new { Message = "UserMedication updated successfully." });
         }
+
         // ================= DELETE =================
         [HttpDelete("{id}")]
         public async Task<ActionResult> DeleteUserMedication(int id)
@@ -158,17 +188,7 @@ namespace api_test.Controllers
             return Ok("UserMedication deleted successfully");
         }
 
-        // ================= HELPERS =================
-        private int GetUserId()
-        {
-            var claim = User.FindFirst(ClaimTypes.NameIdentifier);
-            if (claim == null) throw new UnauthorizedAccessException();
-            return int.Parse(claim.Value);
-        }
-
-
-        //==============================add by OCR or with 2 steps ============================
-
+        // ================= 2-STEP: INIT =================
         [HttpPost("init")]
         public async Task<ActionResult> InitUserMedication(InitUserMedicationDto dto)
         {
@@ -181,12 +201,10 @@ namespace api_test.Controllers
                 return NotFound(new { Message = $"Medication '{dto.MedicationName}' not found." });
 
             var alreadyExists = await _context.UserMedications
-       .AnyAsync(um => um.UserId == userId && um.MedId == medication.ID);
+                .AnyAsync(um => um.UserId == userId && um.MedId == medication.ID);
 
             if (alreadyExists)
                 return BadRequest(new { Message = $"You already have '{dto.MedicationName}' in your medications." });
-
-
 
             var userMed = new UserMedication
             {
@@ -197,14 +215,22 @@ namespace api_test.Controllers
             _context.UserMedications.Add(userMed);
             await _context.SaveChangesAsync();
 
-            return Ok(new
+            // Check interactions for the 2-step flow too
+            var warnings = await _interactionService
+                .CheckInteractionsForNewMedAsync(userId, dto.MedicationName);
+
+            var response = new
             {
                 Message = "Medication selected successfully.",
                 UserMedicationId = userMed.Id,
-                MedicationName = medication.Trade_name
-            });
+                MedicationName = medication.Trade_name,
+                InteractionWarnings = warnings.Count > 0 ? warnings : null
+            };
+
+            return Ok(response);
         }
 
+        // ================= 2-STEP: DETAILS =================
         [HttpPut("{id}/details")]
         public async Task<ActionResult> AddUserMedicationDetails(int id, UserMedicationDetailsDto dto)
         {
@@ -237,8 +263,12 @@ namespace api_test.Controllers
             return Ok(new { Message = "Medication details added successfully." });
         }
 
-
+        // ================= HELPERS =================
+        private int GetUserId()
+        {
+            var claim = User.FindFirst(ClaimTypes.NameIdentifier);
+            if (claim == null) throw new UnauthorizedAccessException();
+            return int.Parse(claim.Value);
+        }
     }
-
-
 }

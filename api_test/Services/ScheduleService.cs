@@ -20,20 +20,13 @@ namespace api_test.Services
 
         public async Task GenerateScheduleAsync(UserMedication userMed)
         {
-            // FIX #1 & #2: DateOnly has no .Date property.
-            // Use DateOnly.ToDateTime(TimeOnly) to convert to DateTime.
-            // StartDate is DateOnly? (nullable) → use .HasValue / .Value
-            // FirstDoseTime is TimeOnly? (nullable) → use .HasValue / .Value
-
             if (!userMed.StartDate.HasValue || !userMed.FirstDoseTime.HasValue)
-                return; // Cannot generate schedule without start date and first dose time
+                return;
 
             var schedules = new List<MedicationSchedule>();
 
-            // DateOnly.ToDateTime(TimeOnly) → correct way to combine DateOnly + TimeOnly into DateTime
             DateTime start = userMed.StartDate.Value.ToDateTime(userMed.FirstDoseTime.Value);
 
-            // EndDate is DateOnly? — use .HasValue and .Value.ToDateTime(...)
             DateTime end = userMed.EndDate.HasValue
                 ? userMed.EndDate.Value.ToDateTime(TimeOnly.MinValue).AddDays(1)
                 : start.AddYears(1);
@@ -94,7 +87,6 @@ namespace api_test.Services
             return await _context.MedicationSchedules
                 .Include(s => s.UserMedication)
                     .ThenInclude(um => um!.Medication)
-                // FIX #3: MedicationSchedule FK is UserMedicationId, NOT UserMedId
                 .Where(s => s.UserMedicationId == userMedId)
                 .OrderBy(s => s.ScheduledAt)
                 .Select(s => ToScheduleDto(s))
@@ -116,7 +108,6 @@ namespace api_test.Services
                     Title = a.Title,
                     Message = a.Message,
                     IsRead = a.IsRead,
-                    // FIX #6 (partial): CreatedAt is DateTime → ToString("format") is valid here
                     CreatedAt = a.CreatedAt.ToString("yyyy-MM-ddTHH:mm:ssZ")
                 })
                 .ToListAsync();
@@ -158,6 +149,34 @@ namespace api_test.Services
             return true;
         }
 
+        // ── NEW: Schedules by specific date ───────────────────────────────────
+        /// <summary>
+        /// Returns all MedicationSchedule records for a user where ScheduledAt
+        /// falls on the given date (UTC). Produces a >= / < range comparison so
+        /// EF Core can push it down as a SQL BETWEEN-style filter — never use
+        /// EF.Functions or .Date in a LINQ query because they may not translate.
+        /// </summary>
+        public async Task<List<MedicationScheduleDto>> GetSchedulesByDateAsync(
+            int userId, DateOnly date)
+        {
+            // Convert DateOnly → two DateTime fence-posts so EF Core can
+            // translate the comparison to SQL without any client-side evaluation.
+            //   dayStart = 2026-03-12 00:00:00  (inclusive)
+            //   dayEnd   = 2026-03-13 00:00:00  (exclusive)
+            DateTime dayStart = date.ToDateTime(TimeOnly.MinValue);   // midnight
+            DateTime dayEnd = dayStart.AddDays(1);                  // next midnight
+
+            return await _context.MedicationSchedules
+                .Include(s => s.UserMedication)
+                    .ThenInclude(um => um!.Medication)
+                .Where(s => s.UserMedication!.UserId == userId
+                         && s.ScheduledAt >= dayStart                 // >= 2026-03-12 00:00
+                         && s.ScheduledAt < dayEnd)                  // <  2026-03-13 00:00
+                .OrderBy(s => s.ScheduledAt)
+                .Select(s => ToScheduleDto(s))
+                .ToListAsync();
+        }
+
         // =====================================================================
         // PRIVATE HELPERS
         // =====================================================================
@@ -165,10 +184,8 @@ namespace api_test.Services
         private static MedicationSchedule BuildEntry(int userMedId, DateTime scheduledAt)
             => new MedicationSchedule
             {
-                // FIX #4 & #5: Use UserMedicationId (the actual FK name in the entity), NOT UserMedId
                 UserMedicationId = userMedId,
                 ScheduledAt = scheduledAt,
-                // FIX #6: NotificationTime is DateTime? → ToString("format") is valid on DateTime
                 NotificationTime = scheduledAt.AddMinutes(-15),
                 Status = "Pending",
                 ReminderSent = false,
@@ -180,12 +197,9 @@ namespace api_test.Services
             => new MedicationScheduleDto
             {
                 Id = s.Id,
-                // FIX: Reference UserMedicationId, not UserMedId
                 UserMedId = s.UserMedicationId,
                 MedName = s.UserMedication?.Medication?.Trade_name ?? string.Empty,
-                // ScheduledAt is DateTime → .ToString("format") is valid
                 ScheduledAt = s.ScheduledAt.ToString("yyyy-MM-ddTHH:mm:ssZ"),
-                // NotificationTime is DateTime? → use null-conditional + GetValueOrDefault for safety
                 NotificationTime = s.NotificationTime.HasValue
                     ? s.NotificationTime.Value.ToString("yyyy-MM-ddTHH:mm:ssZ")
                     : string.Empty,

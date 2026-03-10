@@ -62,6 +62,8 @@ namespace api_test
             builder.Services.AddScoped<OtpService>();
             builder.Services.AddScoped<IScheduleService, ScheduleService>();
 
+            builder.Services.AddScoped<IInteractionService, InteractionService>();
+
             var app = builder.Build();
 
           

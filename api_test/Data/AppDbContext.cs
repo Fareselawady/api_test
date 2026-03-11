@@ -103,13 +103,13 @@ namespace api_test.Data
              .HasOne(a => a.User)
              .WithMany(u => u.Alerts)
             .HasForeignKey(a => a.UserId)
-           .OnDelete(DeleteBehavior.Restrict);
+           .OnDelete(DeleteBehavior.NoAction);
 
             modelBuilder.Entity<Alert>()
                 .HasOne(a => a.UserMedication)
                 .WithMany(m => m.Alerts)
                 .HasForeignKey(a => a.UserMedicationId)
-                .OnDelete(DeleteBehavior.NoAction);
+                .OnDelete(DeleteBehavior.Cascade);
 
             modelBuilder.Entity<Alert>()
                 .HasOne(a => a.MedicationSchedule)

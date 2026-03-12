@@ -1,4 +1,5 @@
 ﻿using api_test.Data;
+using api_test.Models;
 using Microsoft.EntityFrameworkCore;
 
 namespace api_test.Services
@@ -94,6 +95,64 @@ namespace api_test.Services
             }
 
             return warnings;
+        }
+
+        public async Task<List<MedicationInteractionDto>> GetInteractionsForUserMedication(int userId, int medId)
+        {
+            var result = new List<MedicationInteractionDto>();
+
+            // get medication
+            var med = await _context.Medications
+                .FirstOrDefaultAsync(x => x.ID == medId);
+
+            if (med == null)
+                return result;
+
+            // get ingredients
+            var medIngredients = await _context.Med_Ingredients_Link
+                .Where(x => x.Med_id == medId)
+                .Select(x => x.Ingredient_id)
+                .ToListAsync();
+
+            var userMeds = await _context.UserMedications
+                .Include(x => x.Medication)
+                .Where(x => x.UserId == userId && x.MedId != medId)
+                .ToListAsync();
+
+            foreach (var userMed in userMeds)
+            {
+                var otherIngredients =
+                    await _context.Med_Ingredients_Link
+                    .Where(x => x.Med_id == userMed.MedId)
+                    .Select(x => x.Ingredient_id)
+                    .ToListAsync();
+
+                var interactions = await _context.Drug_Interactions
+                    .Where(di =>
+                        (medIngredients.Contains(di.Ingredient_1_id.Value)
+                        && otherIngredients.Contains(di.Ingredient_2_id.Value))
+
+                        ||
+
+                        (medIngredients.Contains(di.Ingredient_2_id.Value)
+                        && otherIngredients.Contains(di.Ingredient_1_id.Value))
+                    )
+                    .ToListAsync();
+
+                if (interactions.Any())
+                {
+                    result.Add(new MedicationInteractionDto
+                    {
+                        WithMedication = userMed.Medication.Trade_name,
+                        Reason = string.Join(", ", interactions
+    .Select(i => i.Interaction_type)
+    .Where(t => !string.IsNullOrWhiteSpace(t))
+    )
+                    });
+                }
+            }
+
+            return result;
         }
     }
 }

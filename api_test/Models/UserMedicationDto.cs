@@ -24,5 +24,8 @@
         public int? IntervalHours { get; set; }
 
         public bool NotificationActive { get; set; }
+        public List<MedicationInteractionDto> Interactions { get; set; }
+
+        public bool HasInteractions => Interactions != null && Interactions.Any();
     }
 }

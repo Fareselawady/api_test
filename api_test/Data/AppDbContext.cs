@@ -50,9 +50,6 @@ namespace api_test.Data
             modelBuilder.Entity<MedicationSchedule>(entity =>
             {
                 entity.Property(e => e.UserMedicationId).HasColumnName("UserMedId");
-                entity.Ignore(e => e.TakenAt);
-                entity.Ignore(e => e.SnoozedUntil);
-                entity.Ignore(e => e.Notes);
                 entity.Property(e => e.NotificationTime).IsRequired(false);
             });
 

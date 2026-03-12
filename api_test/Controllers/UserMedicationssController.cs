@@ -106,32 +106,48 @@ namespace api_test.Controllers
         {
             var userId = GetUserId();
 
-            var meds = await _context.UserMedications
+            var userMeds = await _context.UserMedications
                 .Include(um => um.Medication)
                 .Where(um => um.UserId == userId)
-                .Select(um => new UserMedicationDto
+                .ToListAsync();
+
+            var result = new List<UserMedicationDto>();
+
+            foreach (var um in userMeds)
+            {
+                var interactions = await _interactionService
+                    .GetInteractionsForUserMedication(userId, um.MedId);
+
+                result.Add(new UserMedicationDto
                 {
                     Id = um.Id,
                     MedId = um.MedId,
                     MedName = um.Medication.Trade_name,
                     Dosage = um.Dosage,
                     Notes = um.Notes,
-                    StartDate = um.StartDate.HasValue ? um.StartDate.Value.ToDateTime(TimeOnly.MinValue) : null,
-                    EndDate = um.EndDate.HasValue ? um.EndDate.Value.ToDateTime(TimeOnly.MinValue) : null,
-                    ExpiryDate = um.ExpiryDate.HasValue ? um.ExpiryDate.Value.ToDateTime(TimeOnly.MinValue) : null,
+
+                    StartDate = um.StartDate?.ToDateTime(TimeOnly.MinValue),
+                    EndDate = um.EndDate?.ToDateTime(TimeOnly.MinValue),
+                    ExpiryDate = um.ExpiryDate?.ToDateTime(TimeOnly.MinValue),
+
                     CurrentPillCount = um.CurrentPillCount,
                     InitialPillCount = um.InitialPillCount,
                     LowStockThreshold = um.LowStockThreshold,
+
                     DosesPerPeriod = um.DosesPerPeriod,
                     PeriodUnit = um.PeriodUnit,
                     PeriodValue = um.PeriodValue,
-                    FirstDoseTime = um.FirstDoseTime.HasValue ? um.FirstDoseTime.Value.ToTimeSpan() : null,
-                    IntervalHours = um.IntervalHours,
-                    NotificationActive = um.NotificationActive
-                })
-                .ToListAsync();
 
-            return Ok(meds);
+                    FirstDoseTime = um.FirstDoseTime?.ToTimeSpan(),
+                    IntervalHours = um.IntervalHours,
+
+                    NotificationActive = um.NotificationActive,
+
+                    Interactions = interactions
+                });
+            }
+
+            return Ok(result);
         }
 
         // ================= UPDATE =================

@@ -1,4 +1,6 @@
-﻿namespace api_test.Services
+﻿using api_test.Models;
+
+namespace api_test.Services
 {
     /// <summary>
     /// Checks drug interactions between a newly added medication and all
@@ -14,5 +16,7 @@
         /// <param name="userId">The user whose existing medications are scanned.</param>
         /// <param name="newMedName">Trade name of the medication being added.</param>
         Task<List<string>> CheckInteractionsForNewMedAsync(int userId, string newMedName);
+
+        Task<List<MedicationInteractionDto>>GetInteractionsForUserMedication(int userId, int medId);
     }
 }

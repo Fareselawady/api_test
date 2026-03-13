@@ -61,9 +61,10 @@ namespace api_test
             builder.Services.AddScoped<EmailService>();
             builder.Services.AddScoped<OtpService>();
             builder.Services.AddScoped<IScheduleService, ScheduleService>();
-
             builder.Services.AddScoped<IInteractionService, InteractionService>();
 
+            builder.Services.AddScoped<IAlertService, AlertService>();
+            builder.Services.AddHostedService<NotificationBackgroundService>();
             var app = builder.Build();
 
           

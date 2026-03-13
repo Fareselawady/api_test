@@ -20,11 +20,12 @@
         public int UserId { get; set; }
         public int? UserMedicationId { get; set; }
         public int? MedicationScheduleId { get; set; }
-        public string? Type { get; set; }
+        public string? Type { get; set; }       // LowStock | ExpiryWarning | DoseReminder
         public string? Title { get; set; }
         public string? Message { get; set; }
         public bool IsRead { get; set; }
-        public string CreatedAt { get; set; } = string.Empty;
+        public string CreatedAt { get; set; } = string.Empty;   // ISO 8601
+        public string ScheduledAt { get; set; } = string.Empty; // ISO 8601
     }
 
     // ── Mark-as-taken / update status request ─────────────────────────────────

@@ -9,23 +9,16 @@ namespace api_test.Services
         Task GenerateScheduleAsync(UserMedication userMed);
 
         // ── Queries ───────────────────────────────────────────────────────────
-
-        /// <summary>All schedules for one UserMedication (across all dates).</summary>
         Task<List<MedicationScheduleDto>> GetSchedulesForMedicationAsync(int userMedId, int requestingUserId);
-
-        /// <summary>All pending alerts for a user.</summary>
         Task<List<AlertDto>> GetPendingAlertsAsync(int userId);
-
-        /// <summary>Schedules whose ScheduledAt falls on today (UTC) for a user.</summary>
         Task<List<MedicationScheduleDto>> GetTodaySchedulesAsync(int userId);
+        Task<List<MedicationScheduleDto>> GetSchedulesByDateAsync(int userId, DateOnly date);
 
-        /// <summary>Update status of a single schedule (Taken / Missed / Pending).</summary>
+        // ── Status Updates ────────────────────────────────────────────────────
+        /// <summary>Pending / Missed only. Use TakeDoseAsync for Taken.</summary>
         Task<bool> UpdateScheduleStatusAsync(int scheduleId, string newStatus, int requestingUserId);
 
-        /// <summary>
-        /// Schedules whose ScheduledAt falls on a specific date (UTC) for a user.
-        /// Used by the mobile home screen week view when the user taps a day.
-        /// </summary>
-        Task<List<MedicationScheduleDto>> GetSchedulesByDateAsync(int userId, DateOnly date);
+        /// <summary>Marks dose as Taken + deducts pill count + triggers LowStock alert if needed.</summary>
+        Task<TakeDoseResult> TakeDoseAsync(int scheduleId, int requestingUserId);
     }
 }

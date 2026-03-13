@@ -25,7 +25,10 @@ namespace api_test.Services
 
             var schedules = new List<MedicationSchedule>();
 
-            DateTime start = userMed.StartDate.Value.ToDateTime(userMed.FirstDoseTime.Value);
+            var cairoZone = TimeZoneInfo.FindSystemTimeZoneById("Egypt Standard Time");
+            DateTime localStart = userMed.StartDate.Value.ToDateTime(userMed.FirstDoseTime.Value);
+            DateTime start = TimeZoneInfo.ConvertTimeToUtc(localStart, cairoZone);
+            start = DateTime.SpecifyKind(start, DateTimeKind.Utc);
 
             DateTime end = userMed.EndDate.HasValue
                 ? userMed.EndDate.Value.ToDateTime(TimeOnly.MinValue).AddDays(1)
@@ -129,13 +132,34 @@ namespace api_test.Services
                 .ToListAsync();
         }
 
+        public async Task<List<MedicationScheduleDto>> GetSchedulesByDateAsync(
+            int userId, DateOnly date)
+        {
+            DateTime dayStart = date.ToDateTime(TimeOnly.MinValue);
+            DateTime dayEnd = dayStart.AddDays(1);
+
+            return await _context.MedicationSchedules
+                .Include(s => s.UserMedication)
+                    .ThenInclude(um => um!.Medication)
+                .Where(s => s.UserMedication!.UserId == userId
+                         && s.ScheduledAt >= dayStart
+                         && s.ScheduledAt < dayEnd)
+                .OrderBy(s => s.ScheduledAt)
+                .Select(s => ToScheduleDto(s))
+                .ToListAsync();
+        }
+
+        // =====================================================================
+        // UPDATE STATUS — Pending / Missed only
+        // =====================================================================
+
         public async Task<bool> UpdateScheduleStatusAsync(
             int scheduleId, string newStatus, int requestingUserId)
         {
-            var valid = new[] { "Pending", "Taken", "Missed" };
+            var valid = new[] { "Pending", "Missed" };
             if (!valid.Contains(newStatus))
                 throw new ArgumentException(
-                    $"Invalid status '{newStatus}'. Must be Pending, Taken or Missed.");
+                    $"Invalid status '{newStatus}'. Use TakeDoseAsync for Taken, or Pending/Missed here.");
 
             var schedule = await _context.MedicationSchedules
                 .Include(s => s.UserMedication)
@@ -144,42 +168,101 @@ namespace api_test.Services
 
             if (schedule is null) return false;
 
+            if (schedule.Status == "Taken")
+                throw new InvalidOperationException(
+                    $"Schedule {scheduleId} is already Taken and cannot be changed.");
+
             schedule.Status = newStatus;
             await _context.SaveChangesAsync();
             return true;
         }
 
-        // ── NEW: Schedules by specific date ───────────────────────────────────
-        /// <summary>
-        /// Returns all MedicationSchedule records for a user where ScheduledAt
-        /// falls on the given date (UTC). Produces a >= / < range comparison so
-        /// EF Core can push it down as a SQL BETWEEN-style filter — never use
-        /// EF.Functions or .Date in a LINQ query because they may not translate.
-        /// </summary>
-        public async Task<List<MedicationScheduleDto>> GetSchedulesByDateAsync(
-            int userId, DateOnly date)
-        {
-            // Convert DateOnly → two DateTime fence-posts so EF Core can
-            // translate the comparison to SQL without any client-side evaluation.
-            //   dayStart = 2026-03-12 00:00:00  (inclusive)
-            //   dayEnd   = 2026-03-13 00:00:00  (exclusive)
-            DateTime dayStart = date.ToDateTime(TimeOnly.MinValue);   // midnight
-            DateTime dayEnd = dayStart.AddDays(1);                  // next midnight
+        // =====================================================================
+        // TAKE DOSE — Taken + deduct pills + instant low stock check
+        // =====================================================================
 
-            return await _context.MedicationSchedules
+        public async Task<TakeDoseResult> TakeDoseAsync(int scheduleId, int requestingUserId)
+        {
+            var schedule = await _context.MedicationSchedules
                 .Include(s => s.UserMedication)
-                    .ThenInclude(um => um!.Medication)
-                .Where(s => s.UserMedication!.UserId == userId
-                         && s.ScheduledAt >= dayStart                 // >= 2026-03-12 00:00
-                         && s.ScheduledAt < dayEnd)                  // <  2026-03-13 00:00
-                .OrderBy(s => s.ScheduledAt)
-                .Select(s => ToScheduleDto(s))
-                .ToListAsync();
+                    .ThenInclude(um => um.Medication)
+                .FirstOrDefaultAsync(s => s.Id == scheduleId
+                                       && s.UserMedication!.UserId == requestingUserId);
+
+            if (schedule is null)
+                return TakeDoseResult.NotFound();
+
+            if (schedule.Status == "Taken")
+                return TakeDoseResult.AlreadyTaken();
+
+            var userMed = schedule.UserMedication;
+            var now = DateTime.UtcNow;
+
+            // 1. Mark as Taken
+            schedule.Status = "Taken";
+            schedule.TakenAt = now;
+
+            // 2. Deduct pill count
+            int pillsDeducted = 0;
+            if (userMed.CurrentPillCount.HasValue)
+            {
+                pillsDeducted = ParsePillsPerDose(userMed.Dosage);
+                userMed.CurrentPillCount = Math.Max(0, userMed.CurrentPillCount.Value - pillsDeducted);
+            }
+
+            // 3. Instant low stock check
+            bool lowStockAlertCreated = false;
+            if (userMed.CurrentPillCount.HasValue && userMed.LowStockThreshold.HasValue
+                && userMed.CurrentPillCount <= userMed.LowStockThreshold)
+            {
+                bool alreadySentToday = await _context.Alerts.AnyAsync(a =>
+                    a.UserMedicationId == userMed.Id &&
+                    a.Type == "LowStock" &&
+                    a.CreatedAt.Date == now.Date);
+
+                if (!alreadySentToday)
+                {
+                    _context.Alerts.Add(new Alert
+                    {
+                        UserId = userMed.UserId,
+                        UserMedicationId = userMed.Id,
+                        Type = "LowStock",
+                        Title = "Low Medication Stock",
+                        Message = $"\"{userMed.Medication.Trade_name}\" is running low. " +
+                                           $"Remaining: {userMed.CurrentPillCount} pill(s) " +
+                                           $"(threshold: {userMed.LowStockThreshold}).",
+                        IsRead = false,
+                        ScheduledAt = now,
+                        CreatedAt = now
+                    });
+                    lowStockAlertCreated = true;
+                }
+            }
+
+            await _context.SaveChangesAsync();
+
+            return TakeDoseResult.Success(
+                scheduleId: scheduleId,
+                pillsDeducted: pillsDeducted,
+                remainingPills: userMed.CurrentPillCount,
+                lowStockAlert: lowStockAlertCreated
+            );
         }
 
         // =====================================================================
         // PRIVATE HELPERS
         // =====================================================================
+
+        /// <summary>
+        /// Reads the leading integer from Dosage (e.g. "2 tablets" -> 2).
+        /// Falls back to 1 if no number is found.
+        /// </summary>
+        private static int ParsePillsPerDose(string? dosage)
+        {
+            if (string.IsNullOrWhiteSpace(dosage)) return 1;
+            var first = dosage.Trim().Split(' ')[0];
+            return int.TryParse(first, out int n) && n > 0 ? n : 1;
+        }
 
         private static MedicationSchedule BuildEntry(int userMedId, DateTime scheduledAt)
             => new MedicationSchedule

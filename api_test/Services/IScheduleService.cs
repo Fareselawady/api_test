@@ -15,10 +15,10 @@ namespace api_test.Services
         Task<List<MedicationScheduleDto>> GetSchedulesByDateAsync(int userId, DateOnly date);
 
         // ── Status Updates ────────────────────────────────────────────────────
-        /// <summary>Pending / Missed only. Use TakeDoseAsync for Taken.</summary>
         Task<bool> UpdateScheduleStatusAsync(int scheduleId, string newStatus, int requestingUserId);
-
-        /// <summary>Marks dose as Taken + deducts pill count + triggers LowStock alert if needed.</summary>
         Task<TakeDoseResult> TakeDoseAsync(int scheduleId, int requestingUserId);
+
+        // ── Snooze ────────────────────────────────────────────────────────────
+        Task<SnoozeResult> SnoozeAsync(int scheduleId, int requestingUserId);
     }
 }

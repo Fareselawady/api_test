@@ -6,13 +6,6 @@ using System.Security.Claims;
 
 namespace api_test.Controllers
 {
-    /// <summary>
-    /// GET   /api/medications/{userMedId}/schedules   → all schedules for a medication
-    /// GET   /api/users/{userId}/today-schedules      → today's schedules
-    /// GET   /api/users/{userId}/schedules-by-date    → schedules for a specific date
-    /// POST  /api/schedules/{scheduleId}/take         → mark as Taken + deduct pills
-    /// PATCH /api/schedules/{scheduleId}/status       → mark as Pending / Missed
-    /// </summary>
     [ApiController]
     [Authorize]
     public class SchedulesController : ControllerBase
@@ -26,8 +19,7 @@ namespace api_test.Controllers
 
         // ── GET /api/medications/{userMedId}/schedules ────────────────────────
         [HttpGet("api/medications/{userMedId:int}/schedules")]
-        public async Task<ActionResult<List<MedicationScheduleDto>>> GetSchedulesForMedication(
-            int userMedId)
+        public async Task<ActionResult<List<MedicationScheduleDto>>> GetSchedulesForMedication(int userMedId)
         {
             var userId = GetUserId();
             var schedules = await _scheduleService.GetSchedulesForMedicationAsync(userMedId, userId);
@@ -43,34 +35,26 @@ namespace api_test.Controllers
         public async Task<ActionResult<List<MedicationScheduleDto>>> GetTodaySchedules(int userId)
         {
             if (!CallerOwnsResource(userId)) return Forbid();
-
-            var schedules = await _scheduleService.GetTodaySchedulesAsync(userId);
-            return Ok(schedules);
+            return Ok(await _scheduleService.GetTodaySchedulesAsync(userId));
         }
 
         // ── GET /api/users/{userId}/schedules-by-date ─────────────────────────
         [HttpGet("api/users/{userId:int}/schedules-by-date")]
         public async Task<ActionResult<List<MedicationScheduleDto>>> GetSchedulesByDate(
-            int userId,
-            [FromQuery] string? date)
+            int userId, [FromQuery] string? date)
         {
             if (!CallerOwnsResource(userId)) return Forbid();
 
             if (string.IsNullOrWhiteSpace(date))
-                return BadRequest(new { message = "The 'date' query parameter is required. Example: ?date=2026-03-12" });
+                return BadRequest(new { message = "The 'date' query parameter is required. Example: ?date=2026-03-14" });
 
             if (!DateOnly.TryParseExact(date, "yyyy-MM-dd", out var parsedDate))
-                return BadRequest(new { message = $"Invalid date format '{date}'. Use yyyy-MM-dd, e.g. 2026-03-12" });
+                return BadRequest(new { message = $"Invalid date format '{date}'. Use yyyy-MM-dd." });
 
-            var schedules = await _scheduleService.GetSchedulesByDateAsync(userId, parsedDate);
-            return Ok(schedules);
+            return Ok(await _scheduleService.GetSchedulesByDateAsync(userId, parsedDate));
         }
 
         // ── POST /api/schedules/{scheduleId}/take ─────────────────────────────
-        /// <summary>
-        /// Marks a dose as Taken, deducts pill count, and fires a LowStock alert
-        /// immediately if CurrentPillCount drops to or below LowStockThreshold.
-        /// </summary>
         [HttpPost("api/schedules/{scheduleId:int}/take")]
         public async Task<ActionResult<TakeDoseResult>> TakeDose(int scheduleId)
         {
@@ -78,22 +62,36 @@ namespace api_test.Controllers
             var result = await _scheduleService.TakeDoseAsync(scheduleId, userId);
 
             if (!result.Succeeded)
-            {
-                if (result.Error!.Contains("not found"))
-                    return NotFound(new { message = result.Error });
+                return result.Error!.Contains("not found")
+                    ? NotFound(new { message = result.Error })
+                    : BadRequest(new { message = result.Error });
 
-                return BadRequest(new { message = result.Error });
-            }
+            return Ok(result);
+        }
+
+        // ── POST /api/schedules/{scheduleId}/snooze ───────────────────────────
+        /// <summary>
+        /// Snooze a dose reminder for 1 hour.
+        /// Max 2 snoozes — after that the dose is marked as Missed automatically.
+        /// </summary>
+        [HttpPost("api/schedules/{scheduleId:int}/snooze")]
+        public async Task<ActionResult<SnoozeResult>> SnoozeDose(int scheduleId)
+        {
+            var userId = GetUserId();
+            var result = await _scheduleService.SnoozeAsync(scheduleId, userId);
+
+            if (!result.Succeeded)
+                return result.Error!.Contains("not found")
+                    ? NotFound(new { message = result.Error })
+                    : BadRequest(new { message = result.Error });
 
             return Ok(result);
         }
 
         // ── PATCH /api/schedules/{scheduleId}/status ──────────────────────────
-        /// <summary>Update status to Pending or Missed. Use /take for Taken.</summary>
         [HttpPatch("api/schedules/{scheduleId:int}/status")]
         public async Task<ActionResult> UpdateScheduleStatus(
-            int scheduleId,
-            [FromBody] UpdateScheduleStatusDto dto)
+            int scheduleId, [FromBody] UpdateScheduleStatusDto dto)
         {
             if (string.IsNullOrWhiteSpace(dto.Status))
                 return BadRequest(new { message = "Status is required." });
@@ -105,14 +103,8 @@ namespace api_test.Controllers
             {
                 updated = await _scheduleService.UpdateScheduleStatusAsync(scheduleId, dto.Status, userId);
             }
-            catch (ArgumentException ex)
-            {
-                return BadRequest(new { message = ex.Message });
-            }
-            catch (InvalidOperationException ex)
-            {
-                return BadRequest(new { message = ex.Message });
-            }
+            catch (ArgumentException ex) { return BadRequest(new { message = ex.Message }); }
+            catch (InvalidOperationException ex) { return BadRequest(new { message = ex.Message }); }
 
             if (!updated)
                 return NotFound(new { message = $"Schedule {scheduleId} not found or access denied." });
@@ -129,9 +121,6 @@ namespace api_test.Controllers
         }
 
         private bool CallerOwnsResource(int userId)
-        {
-            var callerId = GetUserId();
-            return User.IsInRole("Admin") || callerId == userId;
-        }
+            => User.IsInRole("Admin") || GetUserId() == userId;
     }
 }

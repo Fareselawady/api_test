@@ -5,12 +5,26 @@
     {
         public int Id { get; set; }
         public int UserMedId { get; set; }
-        public string MedName { get; set; } = string.Empty;  // joined from Medication
-        public string ScheduledAt { get; set; } = string.Empty;  // ISO-8601 string
+        public int MedId { get; set; }                        // ← مضاف عشان نعمل interaction check
+        public string MedName { get; set; } = string.Empty;
+        public string ScheduledAt { get; set; } = string.Empty;
         public string NotificationTime { get; set; } = string.Empty;
         public string Status { get; set; } = string.Empty;
         public bool ReminderSent { get; set; }
         public int SnoozeCount { get; set; }
+
+        // ── Interactions ──────────────────────────────────────────────────────
+        /// <summary>
+        /// true if this medication has at least one interaction with any
+        /// other medication the user currently has (not just today's doses).
+        /// </summary>
+        public bool HasInteractions { get; set; } = false;
+
+        /// <summary>
+        /// List of interactions — only populated for today-schedules endpoint.
+        /// Each entry contains the conflicting med name and the interaction type.
+        /// </summary>
+        public List<MedicationInteractionDto> Interactions { get; set; } = new();
     }
 
     // ── Alert response DTO ────────────────────────────────────────────────────

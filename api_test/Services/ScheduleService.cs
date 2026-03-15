@@ -8,10 +8,15 @@ namespace api_test.Services
     public class ScheduleService : IScheduleService
     {
         private readonly AppDbContext _context;
+        private readonly IInteractionService _interactionService;
+        private const int MaxRetries = 2;
+        private static readonly TimeZoneInfo CairoZone =
+            TimeZoneInfo.FindSystemTimeZoneById("Egypt Standard Time");
 
-        public ScheduleService(AppDbContext context)
+        public ScheduleService(AppDbContext context, IInteractionService interactionService)
         {
             _context = context;
+            _interactionService = interactionService;
         }
 
         // =====================================================================
@@ -25,9 +30,8 @@ namespace api_test.Services
 
             var schedules = new List<MedicationSchedule>();
 
-            var cairoZone = TimeZoneInfo.FindSystemTimeZoneById("Egypt Standard Time");
             DateTime localStart = userMed.StartDate.Value.ToDateTime(userMed.FirstDoseTime.Value);
-            DateTime start = TimeZoneInfo.ConvertTimeToUtc(localStart, cairoZone);
+            DateTime start = TimeZoneInfo.ConvertTimeToUtc(localStart, CairoZone);
             start = DateTime.SpecifyKind(start, DateTimeKind.Utc);
 
             DateTime end = userMed.EndDate.HasValue
@@ -116,37 +120,77 @@ namespace api_test.Services
                 .ToListAsync();
         }
 
+        // ── TODAY SCHEDULES ───────────────────────────────────────────────────
         public async Task<List<MedicationScheduleDto>> GetTodaySchedulesAsync(int userId)
         {
-            var todayStart = DateTime.UtcNow.Date;
-            var todayEnd = todayStart.AddDays(1);
+            var cairoNow = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, CairoZone);
+            var rangeStart = TimeZoneInfo.ConvertTimeToUtc(cairoNow.Date, CairoZone);
+            var rangeEnd = rangeStart.AddDays(1);
 
-            return await _context.MedicationSchedules
-                .Include(s => s.UserMedication)
-                    .ThenInclude(um => um!.Medication)
-                .Where(s => s.UserMedication!.UserId == userId
-                         && s.ScheduledAt >= todayStart
-                         && s.ScheduledAt < todayEnd)
-                .OrderBy(s => s.ScheduledAt)
-                .Select(s => ToScheduleDto(s))
-                .ToListAsync();
+            return await GetSchedulesWithInteractionsAsync(userId, rangeStart, rangeEnd);
         }
 
+        // ── SCHEDULES BY DATE ─────────────────────────────────────────────────
         public async Task<List<MedicationScheduleDto>> GetSchedulesByDateAsync(
             int userId, DateOnly date)
         {
-            DateTime dayStart = date.ToDateTime(TimeOnly.MinValue);
-            DateTime dayEnd = dayStart.AddDays(1);
+            // حوّل التاريخ المطلوب من Cairo لـ UTC
+            var rangeStart = TimeZoneInfo.ConvertTimeToUtc(
+                date.ToDateTime(TimeOnly.MinValue), CairoZone);
+            var rangeEnd = rangeStart.AddDays(1);
 
-            return await _context.MedicationSchedules
+            return await GetSchedulesWithInteractionsAsync(userId, rangeStart, rangeEnd);
+        }
+
+        // ── SHARED HELPER — جيب الجدولة + التفاعلات ──────────────────────────
+        private async Task<List<MedicationScheduleDto>> GetSchedulesWithInteractionsAsync(
+            int userId, DateTime rangeStart, DateTime rangeEnd)
+        {
+            var schedules = await _context.MedicationSchedules
                 .Include(s => s.UserMedication)
                     .ThenInclude(um => um!.Medication)
                 .Where(s => s.UserMedication!.UserId == userId
-                         && s.ScheduledAt >= dayStart
-                         && s.ScheduledAt < dayEnd)
+                         && s.ScheduledAt >= rangeStart
+                         && s.ScheduledAt < rangeEnd)
                 .OrderBy(s => s.ScheduledAt)
-                .Select(s => ToScheduleDto(s))
                 .ToListAsync();
+
+            // Cache التفاعلات لكل medId عشان ما نكررش نفس الـ query
+            var interactionCache = new Dictionary<int, List<MedicationInteractionDto>>();
+            var result = new List<MedicationScheduleDto>();
+
+            foreach (var schedule in schedules)
+            {
+                var medId = schedule.UserMedication!.MedId;
+
+                if (!interactionCache.ContainsKey(medId))
+                {
+                    // التفاعلات مع كل أدوية اليوزر — مش بس أدوية اليوم
+                    interactionCache[medId] = await _interactionService
+                        .GetInteractionsForUserMedication(userId, medId);
+                }
+
+                var medInteractions = interactionCache[medId];
+
+                result.Add(new MedicationScheduleDto
+                {
+                    Id = schedule.Id,
+                    UserMedId = schedule.UserMedicationId,
+                    MedId = medId,
+                    MedName = schedule.UserMedication.Medication?.Trade_name ?? string.Empty,
+                    ScheduledAt = schedule.ScheduledAt.ToString("yyyy-MM-ddTHH:mm:ssZ"),
+                    NotificationTime = schedule.NotificationTime.HasValue
+                        ? schedule.NotificationTime.Value.ToString("yyyy-MM-ddTHH:mm:ssZ")
+                        : string.Empty,
+                    Status = schedule.Status ?? string.Empty,
+                    ReminderSent = schedule.ReminderSent,
+                    SnoozeCount = schedule.SnoozeCount,
+                    HasInteractions = medInteractions.Any(),
+                    Interactions = medInteractions
+                });
+            }
+
+            return result;
         }
 
         // =====================================================================
@@ -159,7 +203,7 @@ namespace api_test.Services
             var valid = new[] { "Pending", "Missed" };
             if (!valid.Contains(newStatus))
                 throw new ArgumentException(
-                    $"Invalid status '{newStatus}'. Use TakeDoseAsync for Taken, or Pending/Missed here.");
+                    $"Invalid status '{newStatus}'. Use TakeDoseAsync for Taken.");
 
             var schedule = await _context.MedicationSchedules
                 .Include(s => s.UserMedication)
@@ -178,7 +222,7 @@ namespace api_test.Services
         }
 
         // =====================================================================
-        // TAKE DOSE — Taken + deduct pills + instant low stock check
+        // TAKE DOSE
         // =====================================================================
 
         public async Task<TakeDoseResult> TakeDoseAsync(int scheduleId, int requestingUserId)
@@ -189,20 +233,21 @@ namespace api_test.Services
                 .FirstOrDefaultAsync(s => s.Id == scheduleId
                                        && s.UserMedication!.UserId == requestingUserId);
 
-            if (schedule is null)
-                return TakeDoseResult.NotFound();
-
-            if (schedule.Status == "Taken")
-                return TakeDoseResult.AlreadyTaken();
+            if (schedule is null) return TakeDoseResult.NotFound();
+            if (schedule.Status == "Taken") return TakeDoseResult.AlreadyTaken();
 
             var userMed = schedule.UserMedication;
             var now = DateTime.UtcNow;
 
-            // 1. Mark as Taken
             schedule.Status = "Taken";
             schedule.TakenAt = now;
+            schedule.SnoozedUntil = null;
 
-            // 2. Deduct pill count
+            var relatedAlerts = await _context.Alerts
+                .Where(a => a.MedicationScheduleId == scheduleId && !a.IsRead)
+                .ToListAsync();
+            relatedAlerts.ForEach(a => a.IsRead = true);
+
             int pillsDeducted = 0;
             if (userMed.CurrentPillCount.HasValue)
             {
@@ -210,7 +255,6 @@ namespace api_test.Services
                 userMed.CurrentPillCount = Math.Max(0, userMed.CurrentPillCount.Value - pillsDeducted);
             }
 
-            // 3. Instant low stock check
             bool lowStockAlertCreated = false;
             if (userMed.CurrentPillCount.HasValue && userMed.LowStockThreshold.HasValue
                 && userMed.CurrentPillCount <= userMed.LowStockThreshold)
@@ -250,13 +294,43 @@ namespace api_test.Services
         }
 
         // =====================================================================
+        // SNOOZE
+        // =====================================================================
+
+        public async Task<SnoozeResult> SnoozeAsync(int scheduleId, int requestingUserId)
+        {
+            var schedule = await _context.MedicationSchedules
+                .Include(s => s.UserMedication)
+                    .ThenInclude(um => um.Medication)
+                .FirstOrDefaultAsync(s => s.Id == scheduleId
+                                       && s.UserMedication!.UserId == requestingUserId);
+
+            if (schedule is null) return SnoozeResult.NotFound();
+            if (schedule.Status == "Taken") return SnoozeResult.AlreadyTaken();
+            if (schedule.Status == "Missed") return SnoozeResult.AlreadyMissed();
+
+            var now = DateTime.UtcNow;
+            var nextReminder = now.AddHours(1);
+
+            schedule.SnoozeCount++;
+            schedule.SnoozedUntil = nextReminder;
+            schedule.ReminderSent = false;
+            schedule.NotificationTime = nextReminder;
+
+            var relatedAlerts = await _context.Alerts
+                .Where(a => a.MedicationScheduleId == scheduleId && !a.IsRead)
+                .ToListAsync();
+            relatedAlerts.ForEach(a => a.IsRead = true);
+
+            await _context.SaveChangesAsync();
+
+            return SnoozeResult.Success(scheduleId, schedule.SnoozeCount, nextReminder);
+        }
+
+        // =====================================================================
         // PRIVATE HELPERS
         // =====================================================================
 
-        /// <summary>
-        /// Reads the leading integer from Dosage (e.g. "2 tablets" -> 2).
-        /// Falls back to 1 if no number is found.
-        /// </summary>
         private static int ParsePillsPerDose(string? dosage)
         {
             if (string.IsNullOrWhiteSpace(dosage)) return 1;
@@ -281,12 +355,13 @@ namespace api_test.Services
             {
                 Id = s.Id,
                 UserMedId = s.UserMedicationId,
+                MedId = s.UserMedication?.MedId ?? 0,
                 MedName = s.UserMedication?.Medication?.Trade_name ?? string.Empty,
                 ScheduledAt = s.ScheduledAt.ToString("yyyy-MM-ddTHH:mm:ssZ"),
                 NotificationTime = s.NotificationTime.HasValue
                     ? s.NotificationTime.Value.ToString("yyyy-MM-ddTHH:mm:ssZ")
                     : string.Empty,
-                Status = s.Status,
+                Status = s.Status ?? string.Empty,
                 ReminderSent = s.ReminderSent,
                 SnoozeCount = s.SnoozeCount
             };

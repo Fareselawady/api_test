@@ -118,19 +118,39 @@ namespace api_test.Controllers
         [HttpDelete("{userId}")]
         public async Task<IActionResult> DeleteUser(int userId)
         {
-            var user = await _context.Users
-                .Include(u => u.UserMedications)  // جلب الأدوية
-                    .ThenInclude(um => um.MedicationSchedules) // جلب الجدولة
-                .Include(u => u.Alerts) // جلب الإشعارات
-                .FirstOrDefaultAsync(u => u.Id == userId);
-
+            var user = await _context.Users.FindAsync(userId);
             if (user == null)
                 return NotFound(new { message = "User not found" });
 
+            // 1. جيب كل الـ schedule IDs بتاعت اليوزر
+            var scheduleIds = await _context.MedicationSchedules
+                .Where(s => s.UserMedication!.UserId == userId)
+                .Select(s => s.Id)
+                .ToListAsync();
+
+            // 2. امسح الـ Alerts المرتبطة بالـ Schedules (NoAction → لازم يتمسح يدوي)
+            if (scheduleIds.Any())
+            {
+                var scheduleAlerts = await _context.Alerts
+                    .Where(a => a.MedicationScheduleId != null
+                             && scheduleIds.Contains(a.MedicationScheduleId.Value))
+                    .ToListAsync();
+                _context.Alerts.RemoveRange(scheduleAlerts);
+            }
+
+            // 3. امسح الـ Alerts المرتبطة باليوزر مباشرةً (NoAction → لازم يتمسح يدوي)
+            var userAlerts = await _context.Alerts
+                .Where(a => a.UserId == userId)
+                .ToListAsync();
+            _context.Alerts.RemoveRange(userAlerts);
+
+            // 4. امسح اليوزر — الـ Cascade هيمسح:
+            //    UserMedications → MedicationSchedules تلقائي
             _context.Users.Remove(user);
+
             await _context.SaveChangesAsync();
 
-            return Ok(new { message = $"User {user.Email} and all related data deleted successfully" });
+            return Ok(new { message = $"User {user.Email} and all related data deleted successfully." });
         }
 
     }

@@ -153,5 +153,41 @@ namespace api_test.Controllers
             return Ok(new { message = $"User {user.Email} and all related data deleted successfully." });
         }
 
+        [Authorize]
+        [HttpGet("{id:int}")]
+        public async Task<IActionResult> GetUserById(int id)
+        {
+            var currentUserId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
+            var isAdmin = User.IsInRole("Admin");
+
+            // يوزر عادي يقدر يجيب نفسه بس
+            if (!isAdmin && currentUserId != id)
+                return Forbid();
+
+            var user = await _context.Users
+                .Include(u => u.Role)
+                .Where(u => u.Id == id)
+                .Select(u => new
+                {
+                    u.Id,
+                    u.Name,
+                    u.Username,
+                    u.Email,
+                    u.Phone,
+                    u.BirthDate,
+                    u.Gender,
+                    u.CreatedAt,
+                    u.IsEmailVerified,
+                    Role = new { u.Role.RoleId, u.Role.RoleName }
+                })
+                .FirstOrDefaultAsync();
+
+            if (user == null)
+                return NotFound(new { message = "User not found" });
+
+            return Ok(user);
+        }
+
+
     }
 }

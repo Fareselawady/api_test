@@ -315,7 +315,6 @@ namespace api_test.Services
             schedule.SnoozeCount++;
             schedule.SnoozedUntil = nextReminder;
             schedule.ReminderSent = false;
-            schedule.NotificationTime = nextReminder;
 
             var relatedAlerts = await _context.Alerts
                 .Where(a => a.MedicationScheduleId == scheduleId && !a.IsRead)

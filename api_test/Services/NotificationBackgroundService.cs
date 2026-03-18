@@ -109,7 +109,6 @@ namespace api_test.Services
                 .Include(s => s.UserMedication).ThenInclude(um => um.Medication)
                 .Where(s =>
                     s.UserMedication.NotificationActive &&
-                    !s.ReminderSent &&
                     s.Status == "Pending" &&
                     s.SnoozedUntil == null &&           // not snoozed
                     s.SnoozeCount == 0 &&               // not retried yet
@@ -226,11 +225,10 @@ namespace api_test.Services
             var overdue = await db.MedicationSchedules
                 .Include(s => s.UserMedication).ThenInclude(um => um.Medication)
                 .Where(s =>
-                    s.UserMedication.NotificationActive &&
-                    s.ReminderSent &&
-                    s.Status == "Pending" &&
-                    s.SnoozedUntil == null &&
-                    s.ScheduledAt < now)
+    s.UserMedication.NotificationActive &&
+    s.Status == "Pending" &&
+    s.SnoozedUntil == null &&
+    s.ScheduledAt < now)
                 .ToListAsync();
 
             foreach (var schedule in overdue)
@@ -238,7 +236,9 @@ namespace api_test.Services
                 var um = schedule.UserMedication;
 
                 // Check if enough time has passed since last reminder (1 hour)
-                var lastReminderTime = schedule.NotificationTime ?? schedule.ScheduledAt;
+                var lastReminderTime = schedule.ReminderSent
+    ? (schedule.NotificationTime ?? schedule.ScheduledAt)
+    : schedule.ScheduledAt;
                 if ((now - lastReminderTime).TotalHours < RetryIntervalHours)
                     continue;
 

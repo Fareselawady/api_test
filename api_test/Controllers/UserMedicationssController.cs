@@ -16,16 +16,16 @@ namespace api_test.Controllers
     {
         private readonly AppDbContext _context;
         private readonly IScheduleService _scheduleService;
-        private readonly IInteractionService _interactionService; // ← NEW
+        private readonly IInteractionService _interactionService;
 
         public UserMedicationsController(
             AppDbContext context,
             IScheduleService scheduleService,
-            IInteractionService interactionService) // ← NEW
+            IInteractionService interactionService)
         {
             _context = context;
             _scheduleService = scheduleService;
-            _interactionService = interactionService; // ← NEW
+            _interactionService = interactionService;
         }
 
         // ================= CREATE (single-step) =================
@@ -34,21 +34,23 @@ namespace api_test.Controllers
         {
             var userId = GetUserId();
 
-            // 1. Validate the medication exists
             var medication = await _context.Medications
                 .FirstOrDefaultAsync(m => m.Trade_name == dto.MedicationName);
 
             if (medication == null)
                 return NotFound(new { Message = $"Medication '{dto.MedicationName}' not found." });
 
-            // 2. Prevent duplicates
             var alreadyExists = await _context.UserMedications
                 .AnyAsync(um => um.UserId == userId && um.MedId == medication.ID);
 
             if (alreadyExists)
                 return BadRequest(new { Message = $"You already have '{dto.MedicationName}' in your medications." });
 
-            // 3. Save the new medication
+            var originalExpiry = dto.ExpiryDate.HasValue
+                ? DateOnly.FromDateTime(dto.ExpiryDate.Value) : (DateOnly?)null;
+
+            var adjustedExpiry = AdjustExpiryForLiquid(originalExpiry, medication.Dosage_Form);
+
             var userMed = new UserMedication
             {
                 UserId = userId,
@@ -57,7 +59,7 @@ namespace api_test.Controllers
                 Notes = dto.Notes,
                 StartDate = dto.StartDate.HasValue ? DateOnly.FromDateTime(dto.StartDate.Value) : null,
                 EndDate = dto.EndDate.HasValue ? DateOnly.FromDateTime(dto.EndDate.Value) : null,
-                ExpiryDate = dto.ExpiryDate.HasValue ? DateOnly.FromDateTime(dto.ExpiryDate.Value) : null,
+                ExpiryDate = adjustedExpiry,
                 CurrentPillCount = dto.CurrentPillCount,
                 InitialPillCount = dto.InitialPillCount,
                 LowStockThreshold = dto.LowStockThreshold,
@@ -73,30 +75,20 @@ namespace api_test.Controllers
             await _context.SaveChangesAsync();
             await _scheduleService.GenerateScheduleAsync(userMed);
 
-            // 4. Check interactions AFTER saving — medication is always added regardless
-            //    Pass userId so the service only scans THIS user's medications,
-            //    and exclude the just-saved med (service skips same MedId internally).
             var warnings = await _interactionService
                 .CheckInteractionsForNewMedAsync(userId, dto.MedicationName);
 
-            // 5. Build response — same shape whether warnings exist or not
-            if (warnings.Count == 0)
-            {
-                return Ok(new
-                {
-                    Message = $"'{dto.MedicationName}' added to your medications successfully."
-                });
-            }
+            bool expiryWasAdjusted = adjustedExpiry != originalExpiry;
 
             return Ok(new
             {
                 Message = $"'{dto.MedicationName}' added to your medications successfully.",
-                InteractionWarnings = warnings
-                // Example when warnings exist:
-                // "interactionWarnings": [
-                //   "Warning: 'Ibuprofen' may interact with 'Aspirin' (Major).",
-                //   "Warning: 'Ibuprofen' may interact with 'Warfarin' (Moderate)."
-                // ]
+                ExpiryDate = adjustedExpiry,
+                ExpiryAdjusted = expiryWasAdjusted,
+                ExpiryAdjustedNote = expiryWasAdjusted
+                    ? (string?)$"Expiry date adjusted from {originalExpiry:dd/MM/yyyy} to {adjustedExpiry:dd/MM/yyyy} because this is a liquid medication (opened shelf life = 3 months)."
+                    : null,
+                InteractionWarnings = warnings.Count > 0 ? warnings : null
             });
         }
 
@@ -125,24 +117,18 @@ namespace api_test.Controllers
                     MedName = um.Medication.Trade_name,
                     Dosage = um.Dosage,
                     Notes = um.Notes,
-
                     StartDate = um.StartDate?.ToDateTime(TimeOnly.MinValue),
                     EndDate = um.EndDate?.ToDateTime(TimeOnly.MinValue),
                     ExpiryDate = um.ExpiryDate?.ToDateTime(TimeOnly.MinValue),
-
                     CurrentPillCount = um.CurrentPillCount,
                     InitialPillCount = um.InitialPillCount,
                     LowStockThreshold = um.LowStockThreshold,
-
                     DosesPerPeriod = um.DosesPerPeriod,
                     PeriodUnit = um.PeriodUnit,
                     PeriodValue = um.PeriodValue,
-
                     FirstDoseTime = um.FirstDoseTime?.ToTimeSpan(),
                     IntervalHours = um.IntervalHours,
-
                     NotificationActive = um.NotificationActive,
-
                     Interactions = interactions
                 });
             }
@@ -168,12 +154,17 @@ namespace api_test.Controllers
             if (medication == null)
                 return NotFound(new { Message = $"Medication '{dto.MedicationName}' not found." });
 
+            var originalExpiry = dto.ExpiryDate.HasValue
+                ? DateOnly.FromDateTime(dto.ExpiryDate.Value) : (DateOnly?)null;
+
+            var adjustedExpiry = AdjustExpiryForLiquid(originalExpiry, medication.Dosage_Form);
+
             userMed.MedId = medication.ID;
             userMed.Dosage = dto.Dosage;
             userMed.Notes = dto.Notes;
             userMed.StartDate = dto.StartDate.HasValue ? DateOnly.FromDateTime(dto.StartDate.Value) : null;
             userMed.EndDate = dto.EndDate.HasValue ? DateOnly.FromDateTime(dto.EndDate.Value) : null;
-            userMed.ExpiryDate = dto.ExpiryDate.HasValue ? DateOnly.FromDateTime(dto.ExpiryDate.Value) : null;
+            userMed.ExpiryDate = adjustedExpiry;
             userMed.CurrentPillCount = dto.CurrentPillCount;
             userMed.InitialPillCount = dto.InitialPillCount;
             userMed.LowStockThreshold = dto.LowStockThreshold;
@@ -185,7 +176,18 @@ namespace api_test.Controllers
             userMed.NotificationActive = dto.NotificationActive;
 
             await _context.SaveChangesAsync();
-            return Ok(new { Message = "UserMedication updated successfully." });
+
+            bool expiryWasAdjusted = adjustedExpiry != originalExpiry;
+
+            return Ok(new
+            {
+                Message = "UserMedication updated successfully.",
+                ExpiryDate = adjustedExpiry,
+                ExpiryAdjusted = expiryWasAdjusted,
+                ExpiryAdjustedNote = expiryWasAdjusted
+                    ? (string?)$"Expiry date adjusted from {originalExpiry:dd/MM/yyyy} to {adjustedExpiry:dd/MM/yyyy} because this is a liquid medication (opened shelf life = 3 months)."
+                    : null
+            });
         }
 
         // ================= DELETE =================
@@ -193,6 +195,7 @@ namespace api_test.Controllers
         public async Task<ActionResult> DeleteUserMedication(int id)
         {
             var userId = GetUserId();
+
             var userMed = await _context.UserMedications
                 .FirstOrDefaultAsync(um => um.Id == id && um.UserId == userId);
 
@@ -231,19 +234,17 @@ namespace api_test.Controllers
             _context.UserMedications.Add(userMed);
             await _context.SaveChangesAsync();
 
-            // Check interactions for the 2-step flow too
             var warnings = await _interactionService
                 .CheckInteractionsForNewMedAsync(userId, dto.MedicationName);
 
-            var response = new
+            return Ok(new
             {
                 Message = "Medication selected successfully.",
                 UserMedicationId = userMed.Id,
                 MedicationName = medication.Trade_name,
+                DosageForm = medication.Dosage_Form,
                 InteractionWarnings = warnings.Count > 0 ? warnings : null
-            };
-
-            return Ok(response);
+            });
         }
 
         // ================= 2-STEP: DETAILS =================
@@ -253,16 +254,22 @@ namespace api_test.Controllers
             var userId = GetUserId();
 
             var userMed = await _context.UserMedications
+                .Include(um => um.Medication)
                 .FirstOrDefaultAsync(um => um.Id == id && um.UserId == userId);
 
             if (userMed == null)
                 return NotFound(new { Message = "UserMedication not found." });
 
+            var originalExpiry = dto.ExpiryDate.HasValue
+                ? DateOnly.FromDateTime(dto.ExpiryDate.Value) : (DateOnly?)null;
+
+            var adjustedExpiry = AdjustExpiryForLiquid(originalExpiry, userMed.Medication?.Dosage_Form);
+
             userMed.Dosage = dto.Dosage;
             userMed.Notes = dto.Notes;
             userMed.StartDate = dto.StartDate.HasValue ? DateOnly.FromDateTime(dto.StartDate.Value) : null;
             userMed.EndDate = dto.EndDate.HasValue ? DateOnly.FromDateTime(dto.EndDate.Value) : null;
-            userMed.ExpiryDate = dto.ExpiryDate.HasValue ? DateOnly.FromDateTime(dto.ExpiryDate.Value) : null;
+            userMed.ExpiryDate = adjustedExpiry;
             userMed.CurrentPillCount = dto.CurrentPillCount;
             userMed.InitialPillCount = dto.InitialPillCount;
             userMed.LowStockThreshold = dto.LowStockThreshold;
@@ -276,7 +283,17 @@ namespace api_test.Controllers
             await _context.SaveChangesAsync();
             await _scheduleService.GenerateScheduleAsync(userMed);
 
-            return Ok(new { Message = "Medication details added successfully." });
+            bool expiryWasAdjusted = adjustedExpiry != originalExpiry;
+
+            return Ok(new
+            {
+                Message = "Medication details added successfully.",
+                ExpiryDate = adjustedExpiry,
+                ExpiryAdjusted = expiryWasAdjusted,
+                ExpiryAdjustedNote = expiryWasAdjusted
+                    ? (string?)$"Expiry date adjusted from {originalExpiry:dd/MM/yyyy} to {adjustedExpiry:dd/MM/yyyy} because this is a liquid medication (opened shelf life = 3 months)."
+                    : null
+            });
         }
 
         // ================= HELPERS =================
@@ -285,6 +302,30 @@ namespace api_test.Controllers
             var claim = User.FindFirst(ClaimTypes.NameIdentifier);
             if (claim == null) throw new UnauthorizedAccessException();
             return int.Parse(claim.Value);
+        }
+
+        /// <summary>
+        /// لو الدواء سائل → ينقص 3 شهور من تاريخ الصلاحية
+        /// عشان فتح العلبة بيقلل العمر الافتراضي
+        /// </summary>
+        private static DateOnly? AdjustExpiryForLiquid(DateOnly? originalExpiry, string? dosageForm)
+        {
+            if (string.IsNullOrWhiteSpace(dosageForm) || originalExpiry == null)
+                return originalExpiry;
+
+            var liquidForms = new[]
+            {
+                "Syrup", "Suspension", "Oral_Solution", "Oral_Drop",
+                "Oral Drops", "Ampoule", "Vial_powder", "Ophthalmic Solution",
+                "Emulgel", "Gel"
+            };
+
+            bool isLiquid = liquidForms.Any(f =>
+                dosageForm.Equals(f, StringComparison.OrdinalIgnoreCase));
+
+            if (!isLiquid) return originalExpiry;
+
+            return originalExpiry.Value.AddMonths(-3);
         }
     }
 }

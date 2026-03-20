@@ -333,8 +333,14 @@ namespace api_test.Services
         private static int ParsePillsPerDose(string? dosage)
         {
             if (string.IsNullOrWhiteSpace(dosage)) return 1;
-            var first = dosage.Trim().Split(' ')[0];
-            return int.TryParse(first, out int n) && n > 0 ? n : 1;
+
+            var numStr = new string(dosage.TrimStart()
+                                          .TakeWhile(c => char.IsDigit(c) || c == '.')
+                                          .ToArray());
+
+            return decimal.TryParse(numStr, out decimal n) && n > 0
+                ? (int)n
+                : 1;
         }
 
         private static MedicationSchedule BuildEntry(int userMedId, DateTime scheduledAt)

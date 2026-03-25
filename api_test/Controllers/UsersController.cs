@@ -123,12 +123,19 @@ namespace api_test.Controllers
                 return NotFound(new { message = "User not found" });
 
             // 1. جيب كل الـ schedule IDs بتاعت اليوزر
+            // 1. جيب schedule IDs
             var scheduleIds = await _context.MedicationSchedules
                 .Where(s => s.UserMedication!.UserId == userId)
                 .Select(s => s.Id)
                 .ToListAsync();
 
-            // 2. امسح الـ Alerts المرتبطة بالـ Schedules (NoAction → لازم يتمسح يدوي)
+            // 2. جيب survey IDs
+            var surveyIds = await _context.Surveys
+                .Where(s => s.UserId == userId)
+                .Select(s => s.Id)
+                .ToListAsync();
+
+            // 3. امسح Alerts بتاعت الـ Schedules
             if (scheduleIds.Any())
             {
                 var scheduleAlerts = await _context.Alerts
@@ -138,18 +145,24 @@ namespace api_test.Controllers
                 _context.Alerts.RemoveRange(scheduleAlerts);
             }
 
-            // 3. امسح الـ Alerts المرتبطة باليوزر مباشرةً (NoAction → لازم يتمسح يدوي)
+            // 4. امسح Alerts بتاعت الـ Surveys
+            if (surveyIds.Any())
+            {
+                var surveyAlerts = await _context.Alerts
+                    .Where(a => a.SurveyId != null && surveyIds.Contains(a.SurveyId.Value))
+                    .ToListAsync();
+                _context.Alerts.RemoveRange(surveyAlerts);
+            }
+
+            // 5. امسح Alerts اليوزر مباشرةً
             var userAlerts = await _context.Alerts
                 .Where(a => a.UserId == userId)
                 .ToListAsync();
             _context.Alerts.RemoveRange(userAlerts);
 
-            // 4. امسح اليوزر — الـ Cascade هيمسح:
-            //    UserMedications → MedicationSchedules تلقائي
+            // 6. امسح اليوزر — Cascade هيمسح الباقي
             _context.Users.Remove(user);
-
             await _context.SaveChangesAsync();
-
             return Ok(new { message = $"User {user.Email} and all related data deleted successfully." });
         }
 
@@ -184,6 +197,9 @@ namespace api_test.Controllers
 
             if (user == null)
                 return NotFound(new { message = "User not found" });
+
+
+
 
             return Ok(user);
         }

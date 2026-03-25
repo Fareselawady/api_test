@@ -15,6 +15,9 @@
         public int? MedicationScheduleId { get; set; }
         public MedicationSchedule? MedicationSchedule { get; set; }
 
+        public int? SurveyId { get; set; }
+        public int? AdminReplyId { get; set; }
+
         // ================= ALERT DATA =================
         public string? Type { get; set; }
         public string? Title { get; set; }

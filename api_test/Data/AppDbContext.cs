@@ -22,6 +22,8 @@ namespace api_test.Data
         public DbSet<Ingredient> Ingredients { get; set; }
         public DbSet<MedIngredientLink> Med_Ingredients_Link { get; set; }
         public DbSet<DrugInteraction> Drug_Interactions { get; set; }
+        public DbSet<Survey> Surveys { get; set; }
+         public DbSet<AdminReply> AdminReplies { get; set; }
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             base.OnModelCreating(modelBuilder);
@@ -127,8 +129,20 @@ namespace api_test.Data
                 .HasForeignKey(ms => ms.UserMedicationId)
                 .OnDelete(DeleteBehavior.Cascade);
 
-           
-        }
+
+            modelBuilder.Entity<Survey>()
+                .HasOne(s => s.User)
+                .WithMany()
+                .HasForeignKey(s => s.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            modelBuilder.Entity<AdminReply>()
+                .HasOne(r => r.User)
+                .WithMany()
+                .HasForeignKey(r => r.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
 
         }
+
+    }
 }

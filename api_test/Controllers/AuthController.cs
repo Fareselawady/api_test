@@ -14,32 +14,39 @@ namespace api_test.Controllers
         private readonly IAuthService _authService;
         private readonly AppDbContext _context;
 
-
         public AuthController(IAuthService authService, AppDbContext context)
         {
             _authService = authService;
             _context = context;
         }
 
+        // ===== REGISTER =====
         [HttpPost("register")]
         public async Task<ActionResult> Register(UserDto request)
         {
-            var success = await _authService.RegisterAsync(request);
+            var result = await _authService.RegisterAsync(request);
 
-            if (!success)
+            if (result == null)
                 return BadRequest(new { message = "Email is already registered" });
 
-            return Ok(new { message = "OTP sent to your email, please verify" });
+            return Ok(new
+            {
+                message = "OTP sent to your email, please verify",
+                pendingToken = result.PendingToken
+            });
         }
 
+        // ===== LOGIN =====
         [HttpPost("login")]
         public async Task<ActionResult> Login(UserDto request)
         {
             var token = await _authService.LoginAsync(request);
+
             if (token == null)
                 return Unauthorized(new { message = "Invalid email or password" });
 
             var user = await _authService.GetUserByEmailAsync(request.Email);
+
             if (user == null)
                 return NotFound(new { message = "User not found" });
 
@@ -78,6 +85,19 @@ namespace api_test.Controllers
             });
         }
 
+        // ===== VERIFY OTP (Registration flow) =====
+        [HttpPost("verify-register-otp")]
+        public async Task<IActionResult> VerifyRegisterOtp(VerifyOtpDto dto)
+        {
+            var token = await _authService.VerifyOtpAsync(dto.PendingToken, dto.Otp);
+
+            if (string.IsNullOrEmpty(token))
+                return BadRequest(new { message = "Invalid or expired OTP" });
+
+            return Ok(new { message = "Email verified", token });
+        }
+
+        // ===== AUTHENTICATED ENDPOINTS =====
         [Authorize]
         [HttpGet("me")]
         public IActionResult AuthenticatedUser()
@@ -91,17 +111,5 @@ namespace api_test.Controllers
         {
             return Ok(new { message = "Welcome, Admin!" });
         }
-
-        [HttpPost("verify-otp")]
-        public async Task<IActionResult> VerifyOtp(VerifyOtpDto dto)
-        {
-            var token = await _authService.VerifyOtpAsync(dto.Email, dto.Otp);
-
-            if (string.IsNullOrEmpty(token))
-                return BadRequest(new { message = "Invalid or expired OTP" });
-
-            return Ok(new { message = "Email verified", token });
-        }
-
     }
 }

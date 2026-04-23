@@ -1,22 +1,21 @@
 ﻿using api_test.Entities;
 using api_test.Models;
+using static api_test.Services.AuthService;
 
 namespace api_test.Services
 {
     public interface IAuthService
     {
-       
-            // Register: بس يولد OTP ويرجع نجاح/فشل
-            Task<bool> RegisterAsync(UserDto request);
+        // Register: generates OTP, stores temp user, returns pendingToken (or null on failure)
+        Task<RegisterInitResult?> RegisterAsync(UserDto request);
 
-            // VerifyOtp: بعد ما يدخل OTP صح، يتم تسجيله رسميًا ويرجع JWT
-            Task<string?> VerifyOtpAsync(string email, string otp);
+        // VerifyOtp: verifies OTP using pendingToken, creates user, returns JWT
+        Task<string?> VerifyOtpAsync(string pendingToken, string otp);
 
-            // Login: زي القديم
-            Task<string?> LoginAsync(UserDto request);
+        // Login: validates credentials directly, returns JWT immediately — NO OTP
+        Task<string?> LoginAsync(UserDto request);
 
-            // Get user by email: زي القديم
-            Task<User?> GetUserByEmailAsync(string email);
-        }
-    
+        // Get user by email
+        Task<User?> GetUserByEmailAsync(string email);
+    }
 }

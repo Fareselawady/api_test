@@ -17,10 +17,10 @@ namespace api_test.Controllers
         {
             _context = context;
         }
-        
-       
-        [Authorize(Roles = "Admin,Patient")]
-        [HttpGet("All Meds")]
+
+
+        [AllowAnonymous]
+        [HttpGet("all")]
         public async Task<ActionResult> GetMedications()
         {
             var medications = await _context.Medications

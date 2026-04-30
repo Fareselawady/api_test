@@ -20,5 +20,7 @@ namespace api_test.Services
 
         // ── Snooze ────────────────────────────────────────────────────────────
         Task<SnoozeResult> SnoozeAsync(int scheduleId, int requestingUserId);
+
+        Task RegenerateScheduleAsync(UserMedication userMed);
     }
 }

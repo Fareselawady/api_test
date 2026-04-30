@@ -138,58 +138,81 @@ namespace api_test.Controllers
 
         // ================= UPDATE =================
         [HttpPut("{id}")]
-        public async Task<ActionResult> UpdateUserMedication(int id, CreateUserMedicationDto dto)
+        public async Task<ActionResult> UpdateUserMedication(int id, UpdateUserMedicationDto dto)
         {
             var userId = GetUserId();
 
             var userMed = await _context.UserMedications
+                .Include(um => um.Medication)
                 .FirstOrDefaultAsync(um => um.Id == id && um.UserId == userId);
 
             if (userMed == null)
                 return NotFound(new { Message = "UserMedication not found." });
 
-            var medication = await _context.Medications
-                .FirstOrDefaultAsync(m => m.Trade_name == dto.MedicationName);
+            // الحقول العادية
+            if (dto.Dosage != null) userMed.Dosage = dto.Dosage;
+            if (dto.Notes != null) userMed.Notes = dto.Notes;
+            if (dto.StartDate.HasValue) userMed.StartDate = DateOnly.FromDateTime(dto.StartDate.Value);
+            if (dto.EndDate.HasValue) userMed.EndDate = DateOnly.FromDateTime(dto.EndDate.Value);
+            if (dto.CurrentPillCount.HasValue) userMed.CurrentPillCount = dto.CurrentPillCount;
+            if (dto.InitialPillCount.HasValue) userMed.InitialPillCount = dto.InitialPillCount;
+            if (dto.LowStockThreshold.HasValue) userMed.LowStockThreshold = dto.LowStockThreshold;
+            if (dto.FirstDoseTime.HasValue) userMed.FirstDoseTime = TimeOnly.FromTimeSpan(dto.FirstDoseTime.Value);
+            if (dto.NotificationActive.HasValue) userMed.NotificationActive = dto.NotificationActive.Value;
 
-            if (medication == null)
-                return NotFound(new { Message = $"Medication '{dto.MedicationName}' not found." });
+            // Scheduling — لو بعت intervalHours امسح الـ period والعكس
+            if (dto.IntervalHours.HasValue)
+            {
+                userMed.IntervalHours = dto.IntervalHours;
+                userMed.DosesPerPeriod = null;
+                userMed.PeriodUnit = null;
+                userMed.PeriodValue = null;
+            }
+            else if (dto.DosesPerPeriod.HasValue || dto.PeriodUnit != null || dto.PeriodValue.HasValue)
+            {
+                if (dto.DosesPerPeriod.HasValue) userMed.DosesPerPeriod = dto.DosesPerPeriod;
+                if (dto.PeriodUnit != null) userMed.PeriodUnit = dto.PeriodUnit;
+                if (dto.PeriodValue.HasValue) userMed.PeriodValue = dto.PeriodValue;
+                userMed.IntervalHours = null;
+            }
 
-            var originalExpiry = dto.ExpiryDate.HasValue
-                ? DateOnly.FromDateTime(dto.ExpiryDate.Value) : (DateOnly?)null;
-
-            var adjustedExpiry = AdjustExpiryForLiquid(originalExpiry, medication.Dosage_Form);
-
-            userMed.MedId = medication.ID;
-            userMed.Dosage = dto.Dosage;
-            userMed.Notes = dto.Notes;
-            userMed.StartDate = dto.StartDate.HasValue ? DateOnly.FromDateTime(dto.StartDate.Value) : null;
-            userMed.EndDate = dto.EndDate.HasValue ? DateOnly.FromDateTime(dto.EndDate.Value) : null;
-            userMed.ExpiryDate = adjustedExpiry;
-            userMed.CurrentPillCount = dto.CurrentPillCount;
-            userMed.InitialPillCount = dto.InitialPillCount;
-            userMed.LowStockThreshold = dto.LowStockThreshold;
-            userMed.DosesPerPeriod = dto.DosesPerPeriod;
-            userMed.PeriodUnit = dto.PeriodUnit;
-            userMed.PeriodValue = dto.PeriodValue;
-            userMed.FirstDoseTime = dto.FirstDoseTime.HasValue ? TimeOnly.FromTimeSpan(dto.FirstDoseTime.Value) : null;
-            userMed.IntervalHours = dto.IntervalHours;
-            userMed.NotificationActive = dto.NotificationActive;
+            // ExpiryDate فيها logic خاص للسوائل
+            DateOnly? adjustedExpiry = null;
+            DateOnly? originalExpiry = null;
+            if (dto.ExpiryDate.HasValue)
+            {
+                originalExpiry = DateOnly.FromDateTime(dto.ExpiryDate.Value);
+                adjustedExpiry = AdjustExpiryForLiquid(originalExpiry, userMed.Medication?.Dosage_Form);
+                userMed.ExpiryDate = adjustedExpiry;
+            }
 
             await _context.SaveChangesAsync();
 
-            bool expiryWasAdjusted = adjustedExpiry != originalExpiry;
+            // ✅ إعادة الجدولة لو في تغيير يأثر عليها
+            bool scheduleChanged = dto.IntervalHours.HasValue
+                || dto.DosesPerPeriod.HasValue
+                || dto.PeriodUnit != null
+                || dto.PeriodValue.HasValue
+                || dto.FirstDoseTime.HasValue
+                || dto.StartDate.HasValue
+                || dto.EndDate.HasValue;
+
+            if (scheduleChanged)
+                await _scheduleService.RegenerateScheduleAsync(userMed);
+
+            bool expiryWasAdjusted = adjustedExpiry != null && adjustedExpiry != originalExpiry;
 
             return Ok(new
             {
                 Message = "UserMedication updated successfully.",
-                ExpiryDate = adjustedExpiry,
+                ExpiryDate = userMed.ExpiryDate,
                 ExpiryAdjusted = expiryWasAdjusted,
                 ExpiryAdjustedNote = expiryWasAdjusted
                     ? (string?)$"Expiry date adjusted from {originalExpiry:dd/MM/yyyy} to {adjustedExpiry:dd/MM/yyyy} because this is a liquid medication (opened shelf life = 3 months)."
-                    : null
+                    : null,
+                ScheduleRegenerated = scheduleChanged
             });
         }
-
         // ================= DELETE =================
         [HttpDelete("{id}")]
         public async Task<ActionResult> DeleteUserMedication(int id)

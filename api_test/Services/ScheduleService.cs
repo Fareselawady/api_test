@@ -9,7 +9,6 @@ namespace api_test.Services
     {
         private readonly AppDbContext _context;
         private readonly IInteractionService _interactionService;
-        private const int MaxRetries = 2;
         private static readonly TimeZoneInfo CairoZone =
             TimeZoneInfo.FindSystemTimeZoneById("Egypt Standard Time");
 
@@ -23,7 +22,29 @@ namespace api_test.Services
         // GENERATION
         // =====================================================================
 
+        public async Task RegenerateScheduleAsync(UserMedication userMed)
+        {
+            // احذف المواعيد المستقبلية بس (اللي لسه مجاتش)
+            var futureSchedules = await _context.MedicationSchedules
+                .Where(s => s.UserMedicationId == userMed.Id
+                         && s.ScheduledAt > DateTime.UtcNow)
+                .ToListAsync();
+
+            if (futureSchedules.Any())
+            {
+                _context.MedicationSchedules.RemoveRange(futureSchedules);
+                await _context.SaveChangesAsync();
+            }
+
+            // اعمل جدولة جديدة من دلوقتي للأمام
+            await GenerateScheduleAsync(userMed, fromNow: true);
+        }
+
         public async Task GenerateScheduleAsync(UserMedication userMed)
+            => await GenerateScheduleAsync(userMed, fromNow: false);
+
+        // ✅ الـ method الأساسية — fromNow بتتحكم في نقطة البداية
+        private async Task GenerateScheduleAsync(UserMedication userMed, bool fromNow)
         {
             if (!userMed.StartDate.HasValue || !userMed.FirstDoseTime.HasValue)
                 return;
@@ -33,6 +54,10 @@ namespace api_test.Services
             DateTime localStart = userMed.StartDate.Value.ToDateTime(userMed.FirstDoseTime.Value);
             DateTime start = TimeZoneInfo.ConvertTimeToUtc(localStart, CairoZone);
             start = DateTime.SpecifyKind(start, DateTimeKind.Utc);
+
+            // ✅ لو Regenerate وكان StartDate في الماضي → ابدأ من دلوقتي
+            if (fromNow && start < DateTime.UtcNow)
+                start = DateTime.UtcNow;
 
             DateTime end = userMed.EndDate.HasValue
                 ? userMed.EndDate.Value.ToDateTime(TimeOnly.MinValue).AddDays(1)
@@ -120,7 +145,6 @@ namespace api_test.Services
                 .ToListAsync();
         }
 
-        // ── TODAY SCHEDULES ───────────────────────────────────────────────────
         public async Task<List<MedicationScheduleDto>> GetTodaySchedulesAsync(int userId)
         {
             var cairoNow = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, CairoZone);
@@ -130,11 +154,9 @@ namespace api_test.Services
             return await GetSchedulesWithInteractionsAsync(userId, rangeStart, rangeEnd);
         }
 
-        // ── SCHEDULES BY DATE ─────────────────────────────────────────────────
         public async Task<List<MedicationScheduleDto>> GetSchedulesByDateAsync(
             int userId, DateOnly date)
         {
-            // حوّل التاريخ المطلوب من Cairo لـ UTC
             var rangeStart = TimeZoneInfo.ConvertTimeToUtc(
                 date.ToDateTime(TimeOnly.MinValue), CairoZone);
             var rangeEnd = rangeStart.AddDays(1);
@@ -142,7 +164,6 @@ namespace api_test.Services
             return await GetSchedulesWithInteractionsAsync(userId, rangeStart, rangeEnd);
         }
 
-        // ── SHARED HELPER — جيب الجدولة + التفاعلات ──────────────────────────
         private async Task<List<MedicationScheduleDto>> GetSchedulesWithInteractionsAsync(
             int userId, DateTime rangeStart, DateTime rangeEnd)
         {
@@ -155,7 +176,6 @@ namespace api_test.Services
                 .OrderBy(s => s.ScheduledAt)
                 .ToListAsync();
 
-            // Cache التفاعلات لكل medId عشان ما نكررش نفس الـ query
             var interactionCache = new Dictionary<int, List<MedicationInteractionDto>>();
             var result = new List<MedicationScheduleDto>();
 
@@ -165,7 +185,6 @@ namespace api_test.Services
 
                 if (!interactionCache.ContainsKey(medId))
                 {
-                    // التفاعلات مع كل أدوية اليوزر — مش بس أدوية اليوم
                     interactionCache[medId] = await _interactionService
                         .GetInteractionsForUserMedication(userId, medId);
                 }
@@ -194,7 +213,7 @@ namespace api_test.Services
         }
 
         // =====================================================================
-        // UPDATE STATUS — Pending / Missed only
+        // UPDATE STATUS
         // =====================================================================
 
         public async Task<bool> UpdateScheduleStatusAsync(
@@ -273,8 +292,8 @@ namespace api_test.Services
                         Type = "LowStock",
                         Title = "Low Medication Stock",
                         Message = $"\"{userMed.Medication.Trade_name}\" is running low. " +
-                                           $"Remaining: {userMed.CurrentPillCount} pill(s) " +
-                                           $"(threshold: {userMed.LowStockThreshold}).",
+                                  $"Remaining: {userMed.CurrentPillCount} pill(s) " +
+                                  $"(threshold: {userMed.LowStockThreshold}).",
                         IsRead = false,
                         ScheduledAt = now,
                         CreatedAt = now

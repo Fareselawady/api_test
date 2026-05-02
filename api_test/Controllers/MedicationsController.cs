@@ -43,55 +43,76 @@ namespace api_test.Controllers
 
             return Ok(medications);
         }
+
         [Authorize]
         [HttpGet("check-interaction")]
-        public async Task<IActionResult> CheckDrugInteraction(string med1Name, string med2Name)
+        public async Task<IActionResult> CheckDrugInteraction([FromQuery] List<string> medNames)
         {
-            // جيب الدوائين بالاسم
-            var med1 = await _context.Medications
-                .FirstOrDefaultAsync(m => m.Trade_name == med1Name);
+            if (medNames == null || medNames.Count < 2 || medNames.Count > 10)
+                return BadRequest(new { Message = "Please provide between 2 and 10 medications." });
 
-            var med2 = await _context.Medications
-                .FirstOrDefaultAsync(m => m.Trade_name == med2Name);
+            // جيب كل الأدوية
+            var medications = await _context.Medications
+    .Where(m => m.Trade_name != null && medNames.Contains(m.Trade_name))
+    .ToListAsync();
+            // تحقق إن كل الأدوية موجودة
+            var notFound = medNames.Except(medications.Select(m => m.Trade_name)).ToList();
+            if (notFound.Any())
+                return NotFound(new { Message = $"Not found: {string.Join(", ", notFound)}" });
 
-            if (med1 == null)
-                return NotFound(new { Message = $"Medication '{med1Name}' not found." });
-
-            if (med2 == null)
-                return NotFound(new { Message = $"Medication '{med2Name}' not found." });
-
-            // جيب المواد الفعالة بالـ ID اللي جبناه
-            var med1Ingredients = await _context.Med_Ingredients_Link
-                .Where(m => m.Med_id == med1.ID)
-                .Select(m => m.Ingredient_id)
+            // جيب المواد الفعالة لكل دواء
+            var medIds = medications.Select(m => m.ID).ToList();
+            var allIngredients = await _context.Med_Ingredients_Link
+                .Where(m => medIds.Contains(m.Med_id))
                 .ToListAsync();
 
-            var med2Ingredients = await _context.Med_Ingredients_Link
-                .Where(m => m.Med_id == med2.ID)
-                .Select(m => m.Ingredient_id)
-                .ToListAsync();
+            // اعمل dictionary: MedId → List of IngredientIds
+            var medIngredientMap = allIngredients
+                .GroupBy(m => m.Med_id)
+                .ToDictionary(g => g.Key, g => g.Select(x => x.Ingredient_id).ToList());
 
-            var interactions = await _context.Drug_Interactions
-                .Where(di =>
-                    (med1Ingredients.Contains(di.Ingredient_1_id!.Value) && med2Ingredients.Contains(di.Ingredient_2_id!.Value)) ||
-                    (med1Ingredients.Contains(di.Ingredient_2_id!.Value) && med2Ingredients.Contains(di.Ingredient_1_id!.Value))
-                )
-                .ToListAsync();
+            // قارن كل دواء مع الباقيين
+            var results = new List<object>();
 
-            if (!interactions.Any())
-                return Ok(new { Message = $"No interaction between '{med1Name}' and '{med2Name}'." });
-
-            var interactionDetails = interactions.Select(i => new
+            for (int i = 0; i < medications.Count; i++)
             {
-                i.Interaction_type,
-                Med1 = med1.Trade_name,
-                Med2 = med2.Trade_name
-            }).ToList();
+                for (int j = i + 1; j < medications.Count; j++)
+                {
+                    var med1 = medications[i];
+                    var med2 = medications[j];
+
+                    var ing1 = medIngredientMap.GetValueOrDefault(med1.ID, new List<int>());
+                    var ing2 = medIngredientMap.GetValueOrDefault(med2.ID, new List<int>());
+
+                    var interactions = await _context.Drug_Interactions
+                        .Where(di =>
+                            (ing1.Contains(di.Ingredient_1_id!.Value) && ing2.Contains(di.Ingredient_2_id!.Value)) ||
+                            (ing1.Contains(di.Ingredient_2_id!.Value) && ing2.Contains(di.Ingredient_1_id!.Value))
+                        )
+                        .ToListAsync();
+
+                    if (interactions.Any())
+                    {
+                        results.Add(new
+                        {
+                            Med1 = med1.Trade_name,
+                            Med2 = med2.Trade_name,
+                            Interactions = interactions.Select(i => new
+                            {
+                                i.Interaction_type
+                            })
+                        });
+                    }
+                }
+            }
+
+            if (!results.Any())
+                return Ok(new { Message = "No interactions found between the provided medications." });
 
             return Ok(new
             {
-                Message = "Interaction exists between these medications.",
-                Interactions = interactionDetails
+                Message = "Interactions found!",
+                Results = results
             });
         }
 

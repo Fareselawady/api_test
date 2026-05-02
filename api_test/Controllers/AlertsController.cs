@@ -6,15 +6,7 @@ using System.Security.Claims;
 
 namespace api_test.Controllers
 {
-    /// <summary>
-    /// GET    /api/users/{userId}/alerts              → كل الإشعارات
-    /// GET    /api/users/{userId}/alerts/unread       → الغير مقروءة بس
-    /// GET    /api/users/{userId}/alerts/unread-count → عدد الغير مقروءة (badge)
-    /// PATCH  /api/alerts/{alertId}/read              → علّم واحد كمقروء
-    /// PATCH  /api/users/{userId}/alerts/read-all     → علّم الكل كمقروء
-    /// DELETE /api/alerts/{alertId}                   → امسح إشعار واحد
-    /// DELETE /api/alerts/cleanup                     → امسح القديم (Admin)
-    /// </summary>
+    
     [ApiController]
     [Authorize]
     public class AlertsController : ControllerBase
@@ -26,37 +18,57 @@ namespace api_test.Controllers
             _alertService = alertService;
         }
 
-        // ── GET /api/users/{userId}/alerts ────────────────────────────────────
+        // ── GET /api/users/me/alerts (User) ───────────────────────────────────
+        [HttpGet("api/users/me/alerts")]
+        public async Task<ActionResult<List<AlertDto>>> GetMyAll()
+        {
+            var userId = GetUserId();
+            return Ok(await _alertService.GetAllAlertsAsync(userId));
+        }
+
+        // ── GET /api/users/{userId}/alerts (Admin) ────────────────────────────
         [HttpGet("api/users/{userId:int}/alerts")]
-        public async Task<ActionResult<List<AlertDto>>> GetAll(int userId)
+        [Authorize(Roles = "Admin")]
+        public async Task<ActionResult<List<AlertDto>>> GetAllForUser(int userId)
         {
-            if (!CallerOwnsResource(userId)) return Forbid();
-
-            var alerts = await _alertService.GetAllAlertsAsync(userId);
-            return Ok(alerts);
+            return Ok(await _alertService.GetAllAlertsAsync(userId));
         }
 
-        // ── GET /api/users/{userId}/alerts/unread ─────────────────────────────
+        // ── GET /api/users/me/alerts/unread (User) ────────────────────────────
+        [HttpGet("api/users/me/alerts/unread")]
+        public async Task<ActionResult<List<AlertDto>>> GetMyUnread()
+        {
+            var userId = GetUserId();
+            return Ok(await _alertService.GetUnreadAlertsAsync(userId));
+        }
+
+        // ── GET /api/users/{userId}/alerts/unread (Admin) ─────────────────────
         [HttpGet("api/users/{userId:int}/alerts/unread")]
-        public async Task<ActionResult<List<AlertDto>>> GetUnread(int userId)
+        [Authorize(Roles = "Admin")]
+        public async Task<ActionResult<List<AlertDto>>> GetUnreadForUser(int userId)
         {
-            if (!CallerOwnsResource(userId)) return Forbid();
-
-            var alerts = await _alertService.GetUnreadAlertsAsync(userId);
-            return Ok(alerts);
+            return Ok(await _alertService.GetUnreadAlertsAsync(userId));
         }
 
-        // ── GET /api/users/{userId}/alerts/unread-count ───────────────────────
-        [HttpGet("api/users/{userId:int}/alerts/unread-count")]
-        public async Task<ActionResult> GetUnreadCount(int userId)
+        // ── GET /api/users/me/alerts/unread-count (User) ──────────────────────
+        [HttpGet("api/users/me/alerts/unread-count")]
+        public async Task<ActionResult> GetMyUnreadCount()
         {
-            if (!CallerOwnsResource(userId)) return Forbid();
-
+            var userId = GetUserId();
             var count = await _alertService.GetUnreadCountAsync(userId);
             return Ok(new { UnreadCount = count });
         }
 
-        // ── PATCH /api/alerts/{alertId}/read ─────────────────────────────────
+        // ── GET /api/users/{userId}/alerts/unread-count (Admin) ───────────────
+        [HttpGet("api/users/{userId:int}/alerts/unread-count")]
+        [Authorize(Roles = "Admin")]
+        public async Task<ActionResult> GetUnreadCountForUser(int userId)
+        {
+            var count = await _alertService.GetUnreadCountAsync(userId);
+            return Ok(new { UnreadCount = count });
+        }
+
+        // ── PATCH /api/alerts/{alertId}/read ──────────────────────────────────
         [HttpPatch("api/alerts/{alertId:int}/read")]
         public async Task<ActionResult> MarkAsRead(int alertId)
         {
@@ -69,12 +81,20 @@ namespace api_test.Controllers
             return Ok(new { message = "Alert marked as read." });
         }
 
-        // ── PATCH /api/users/{userId}/alerts/read-all ─────────────────────────
-        [HttpPatch("api/users/{userId:int}/alerts/read-all")]
-        public async Task<ActionResult> MarkAllAsRead(int userId)
+        // ── PATCH /api/users/me/alerts/read-all (User) ────────────────────────
+        [HttpPatch("api/users/me/alerts/read-all")]
+        public async Task<ActionResult> MarkMyAllAsRead()
         {
-            if (!CallerOwnsResource(userId)) return Forbid();
+            var userId = GetUserId();
+            var count = await _alertService.MarkAllAsReadAsync(userId);
+            return Ok(new { message = $"{count} alert(s) marked as read." });
+        }
 
+        // ── PATCH /api/users/{userId}/alerts/read-all (Admin) ─────────────────
+        [HttpPatch("api/users/{userId:int}/alerts/read-all")]
+        [Authorize(Roles = "Admin")]
+        public async Task<ActionResult> MarkAllAsReadForUser(int userId)
+        {
             var count = await _alertService.MarkAllAsReadAsync(userId);
             return Ok(new { message = $"{count} alert(s) marked as read." });
         }
@@ -92,7 +112,7 @@ namespace api_test.Controllers
             return Ok(new { message = "Alert deleted." });
         }
 
-        // ── DELETE /api/alerts/cleanup ────────────────────────────────────────
+        // ── DELETE /api/alerts/cleanup (Admin) ────────────────────────────────
         [HttpDelete("api/alerts/cleanup")]
         [Authorize(Roles = "Admin")]
         public async Task<ActionResult> Cleanup([FromQuery] int daysOld = 30)
@@ -107,12 +127,6 @@ namespace api_test.Controllers
             var claim = User.FindFirst(ClaimTypes.NameIdentifier)
                 ?? throw new UnauthorizedAccessException("NameIdentifier claim missing.");
             return int.Parse(claim.Value);
-        }
-
-        private bool CallerOwnsResource(int userId)
-        {
-            var callerId = GetUserId();
-            return User.IsInRole("Admin") || callerId == userId;
         }
     }
 }

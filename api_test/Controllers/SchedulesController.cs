@@ -30,21 +30,44 @@ namespace api_test.Controllers
             return Ok(schedules);
         }
 
-        // ── GET /api/users/{userId}/today-schedules ───────────────────────────
-        [HttpGet("api/users/{userId:int}/today-schedules")]
-        public async Task<ActionResult<List<MedicationScheduleDto>>> GetTodaySchedules(int userId)
+        // ── GET /api/users/me/today-schedules (User) ──────────────────────────
+        [HttpGet("api/users/me/today-schedules")]
+        public async Task<ActionResult<List<MedicationScheduleDto>>> GetMyTodaySchedules()
         {
-            if (!CallerOwnsResource(userId)) return Forbid();
+            var userId = GetUserId();
             return Ok(await _scheduleService.GetTodaySchedulesAsync(userId));
         }
 
-        // ── GET /api/users/{userId}/schedules-by-date ─────────────────────────
+        // ── GET /api/users/{userId}/today-schedules (Admin) ───────────────────
+        [HttpGet("api/users/{userId:int}/today-schedules")]
+        [Authorize(Roles = "Admin")]
+        public async Task<ActionResult<List<MedicationScheduleDto>>> GetTodaySchedulesForUser(int userId)
+        {
+            return Ok(await _scheduleService.GetTodaySchedulesAsync(userId));
+        }
+
+        // ── GET /api/users/me/schedules-by-date (User) ────────────────────────
+        [HttpGet("api/users/me/schedules-by-date")]
+        public async Task<ActionResult<List<MedicationScheduleDto>>> GetMySchedulesByDate(
+            [FromQuery] string? date)
+        {
+            var userId = GetUserId();
+
+            if (string.IsNullOrWhiteSpace(date))
+                return BadRequest(new { message = "The 'date' query parameter is required. Example: ?date=2026-03-14" });
+
+            if (!DateOnly.TryParseExact(date, "yyyy-MM-dd", out var parsedDate))
+                return BadRequest(new { message = $"Invalid date format '{date}'. Use yyyy-MM-dd." });
+
+            return Ok(await _scheduleService.GetSchedulesByDateAsync(userId, parsedDate));
+        }
+
+        // ── GET /api/users/{userId}/schedules-by-date (Admin) ─────────────────
         [HttpGet("api/users/{userId:int}/schedules-by-date")]
-        public async Task<ActionResult<List<MedicationScheduleDto>>> GetSchedulesByDate(
+        [Authorize(Roles = "Admin")]
+        public async Task<ActionResult<List<MedicationScheduleDto>>> GetSchedulesByDateForUser(
             int userId, [FromQuery] string? date)
         {
-            if (!CallerOwnsResource(userId)) return Forbid();
-
             if (string.IsNullOrWhiteSpace(date))
                 return BadRequest(new { message = "The 'date' query parameter is required. Example: ?date=2026-03-14" });
 
@@ -119,8 +142,5 @@ namespace api_test.Controllers
                 ?? throw new UnauthorizedAccessException("NameIdentifier claim missing.");
             return int.Parse(claim.Value);
         }
-
-        private bool CallerOwnsResource(int userId)
-            => User.IsInRole("Admin") || GetUserId() == userId;
     }
 }

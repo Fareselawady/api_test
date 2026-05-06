@@ -114,7 +114,7 @@ namespace api_test.Controllers
                 {
                     Id = um.Id,
                     MedId = um.MedId,
-                    MedName = um.Medication.Trade_name,
+                    MedicationName = um.Medication.Trade_name,  // renamed from MedName
                     Dosage = um.Dosage,
                     Notes = um.Notes,
                     StartDate = um.StartDate?.ToDateTime(TimeOnly.MinValue),
@@ -213,6 +213,7 @@ namespace api_test.Controllers
                 ScheduleRegenerated = scheduleChanged
             });
         }
+
         // ================= DELETE =================
         [HttpDelete("{id}")]
         public async Task<ActionResult> DeleteUserMedication(int id)

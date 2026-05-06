@@ -4,7 +4,7 @@
     {
         public int Id { get; set; }
         public int MedId { get; set; }
-        public string? MedName { get; set; }
+        public string? MedicationName { get; set; }  // renamed from MedName
         public string? Dosage { get; set; }
         public string? Notes { get; set; }
 

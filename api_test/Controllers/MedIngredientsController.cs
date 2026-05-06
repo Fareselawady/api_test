@@ -18,6 +18,26 @@ namespace api_test.Controllers
         {
             _context = context;
         }
+
+
+        [AllowAnonymous]
+        [HttpGet("all")]
+        public async Task<IActionResult> GetAllIngredients()
+        {
+            var ingredients = await _context.Ingredients
+                .Select(i => new IngredientDto
+                {
+                    Id = i.Id,
+                    IngredientName = i.IngredientName ?? "Unknown" 
+                })
+                .ToListAsync();
+
+            if (!ingredients.Any())
+                return NotFound(new { Message = "No ingredients found." });
+
+            return Ok(ingredients);
+        }
+
         [Authorize(Roles = "Admin,Patient")]
         [HttpGet("by-med/{medName}")]
         public async Task<IActionResult> GetIngredientsByMedication(string medName)
@@ -48,45 +68,46 @@ namespace api_test.Controllers
         {
             var medication = await _context.Medications
                 .FirstOrDefaultAsync(m => m.Trade_name == dto.MedicationName);
-
             if (medication == null)
                 return NotFound(new { Message = $"Medication '{dto.MedicationName}' not found." });
 
-            var ingredient = await _context.Ingredients
-                .FirstOrDefaultAsync(i => i.IngredientName == dto.IngredientName);
+            var addedIngredients = new List<object>();
 
-            if (ingredient == null)
-                return NotFound(new { Message = $"Ingredient '{dto.IngredientName}' not found." });
-
-            var alreadyExists = await _context.Med_Ingredients_Link
-                .AnyAsync(m => m.Med_id == medication.ID && m.Ingredient_id == ingredient.Id);
-
-            if (alreadyExists)
-                return BadRequest(new { Message = "Ingredient already linked to this medication." });
-
-            var link = new MedIngredientLink
+            foreach (var item in dto.Ingredients)
             {
-                Med_id = medication.ID,
-                Ingredient_id = ingredient.Id,
-                Strength_value = dto.StrengthValue,
-                Strength_unit = dto.StrengthUnit
-            };
+                var ingredient = await _context.Ingredients
+                    .FirstOrDefaultAsync(i => i.IngredientName == item.IngredientName);
+                if (ingredient == null)
+                    return NotFound(new { Message = $"Ingredient '{item.IngredientName}' not found." });
 
-            _context.Med_Ingredients_Link.Add(link);
+                var alreadyExists = await _context.Med_Ingredients_Link
+                    .AnyAsync(m => m.Med_id == medication.ID && m.Ingredient_id == ingredient.Id);
+                if (alreadyExists)
+                    return BadRequest(new { Message = $"'{item.IngredientName}' already linked to this medication." });
+
+                _context.Med_Ingredients_Link.Add(new MedIngredientLink
+                {
+                    Med_id = medication.ID,
+                    Ingredient_id = ingredient.Id,
+                    Strength_value = item.StrengthValue,
+                    Strength_unit = item.StrengthUnit
+                });
+
+                addedIngredients.Add(new
+                {
+                    Ingredient = ingredient.IngredientName,
+                    item.StrengthValue,
+                    item.StrengthUnit
+                });
+            }
+
             await _context.SaveChangesAsync();
 
             return Ok(new
             {
-                Message = "Ingredient added to medication successfully.",
+                Message = "Ingredients added to medication successfully.",
                 Medication = medication.Trade_name,
-                Ingredient = ingredient.IngredientName,
-                Stored_As = new
-                {
-                    Med_id = medication.ID,
-                    Ingredient_id = ingredient.Id,
-                    dto.StrengthValue,
-                    dto.StrengthUnit
-                }
+                Added = addedIngredients
             });
         }
     }

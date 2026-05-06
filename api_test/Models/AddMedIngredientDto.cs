@@ -3,8 +3,6 @@
     public class AddMedIngredientDto
     {
         public string MedicationName { get; set; } = null!;
-        public string IngredientName { get; set; } = null!;
-        public int? StrengthValue { get; set; }
-        public string? StrengthUnit { get; set; }
+        public List<IngredientItemDto> Ingredients { get; set; } = new();
     }
 }

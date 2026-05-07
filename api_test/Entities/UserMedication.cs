@@ -8,7 +8,7 @@
         public User User { get; set; } = null!;
 
         public int MedId { get; set; }
-        public Medication Medication { get; set; } = null!; // FK على MedId
+        public Medication Medication { get; set; } = null!;
 
         public string? Dosage { get; set; }
         public string? Notes { get; set; }

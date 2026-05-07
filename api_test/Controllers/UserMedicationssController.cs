@@ -34,6 +34,62 @@ namespace api_test.Controllers
         {
             var userId = GetUserId();
 
+            // ── Basic validation ──────────────────────────────────────────────
+            if (dto.CurrentPillCount.HasValue && dto.CurrentPillCount < 0)
+                return BadRequest(new { Message = "currentPillCount must not be negative." });
+
+            if (dto.InitialPillCount.HasValue && dto.InitialPillCount < 0)
+                return BadRequest(new { Message = "initialPillCount must not be negative." });
+
+            if (dto.LowStockThreshold.HasValue && dto.LowStockThreshold < 0)
+                return BadRequest(new { Message = "lowStockThreshold must not be negative." });
+
+            if (dto.IntervalHours.HasValue && dto.IntervalHours <= 0)
+                return BadRequest(new { Message = "intervalHours must be greater than 0." });
+
+            if (dto.DosesPerPeriod.HasValue && dto.DosesPerPeriod <= 0)
+                return BadRequest(new { Message = "dosesPerPeriod must be greater than 0." });
+
+            // ── Resolve and validate custom dose times ────────────────────────
+            List<TimeOnly>? resolvedDoseTimes = null;
+
+            bool hasCustomTimes = dto.DoseTimes != null && dto.DoseTimes.Count > 0;
+
+            if (hasCustomTimes)
+            {
+                // Validate format
+                var parsed = new List<TimeOnly>();
+                foreach (var raw in dto.DoseTimes!)
+                {
+                    if (!TimeOnly.TryParse(raw, out var t))
+                        return BadRequest(new { Message = $"Invalid dose time format: '{raw}'. Use HH:mm:ss or HH:mm." });
+                    parsed.Add(t);
+                }
+
+                // Deduplicate and sort
+                resolvedDoseTimes = parsed.Distinct().OrderBy(t => t).ToList();
+
+                if (resolvedDoseTimes.Count == 0)
+                    return BadRequest(new { Message = "doseTimes must contain at least one valid time." });
+
+                if (dto.IntervalHours.HasValue)
+                    return BadRequest(new { Message = "intervalHours must not be used together with doseTimes." });
+
+                // Compatibility: auto-fill firstDoseTime / dosesPerPeriod
+                if (!dto.FirstDoseTime.HasValue)
+                    dto.FirstDoseTime = resolvedDoseTimes[0].ToTimeSpan();
+
+                if (!dto.DosesPerPeriod.HasValue)
+                    dto.DosesPerPeriod = resolvedDoseTimes.Count;
+
+                if (string.IsNullOrWhiteSpace(dto.PeriodUnit))
+                    dto.PeriodUnit = "Day";
+
+                if (!dto.PeriodValue.HasValue)
+                    dto.PeriodValue = 1;
+            }
+
+            // ── Find medication ───────────────────────────────────────────────
             var medication = await _context.Medications
                 .FirstOrDefaultAsync(m => m.Trade_name == dto.MedicationName);
 
@@ -46,11 +102,13 @@ namespace api_test.Controllers
             if (alreadyExists)
                 return BadRequest(new { Message = $"You already have '{dto.MedicationName}' in your medications." });
 
+            // ── Expiry adjustment ─────────────────────────────────────────────
             var originalExpiry = dto.ExpiryDate.HasValue
                 ? DateOnly.FromDateTime(dto.ExpiryDate.Value) : (DateOnly?)null;
 
             var adjustedExpiry = AdjustExpiryForLiquid(originalExpiry, medication.Dosage_Form);
 
+            // ── Build entity ──────────────────────────────────────────────────
             var userMed = new UserMedication
             {
                 UserId = userId,
@@ -67,13 +125,17 @@ namespace api_test.Controllers
                 PeriodUnit = dto.PeriodUnit,
                 PeriodValue = dto.PeriodValue,
                 FirstDoseTime = dto.FirstDoseTime.HasValue ? TimeOnly.FromTimeSpan(dto.FirstDoseTime.Value) : null,
-                IntervalHours = dto.IntervalHours,
+                IntervalHours = hasCustomTimes ? null : dto.IntervalHours,
                 NotificationActive = dto.NotificationActive
             };
 
             _context.UserMedications.Add(userMed);
             await _context.SaveChangesAsync();
-            await _scheduleService.GenerateScheduleAsync(userMed);
+
+            if (hasCustomTimes && resolvedDoseTimes != null)
+                await _scheduleService.GenerateScheduleWithDoseTimesAsync(userMed, resolvedDoseTimes);
+            else
+                await _scheduleService.GenerateScheduleAsync(userMed);
 
             var warnings = await _interactionService
                 .CheckInteractionsForNewMedAsync(userId, dto.MedicationName);
@@ -114,7 +176,7 @@ namespace api_test.Controllers
                 {
                     Id = um.Id,
                     MedId = um.MedId,
-                    MedicationName = um.Medication.Trade_name,  // renamed from MedName
+                    MedicationName = um.Medication.Trade_name,
                     Dosage = um.Dosage,
                     Notes = um.Notes,
                     StartDate = um.StartDate?.ToDateTime(TimeOnly.MinValue),
@@ -149,7 +211,6 @@ namespace api_test.Controllers
             if (userMed == null)
                 return NotFound(new { Message = "UserMedication not found." });
 
-            // الحقول العادية
             if (dto.Dosage != null) userMed.Dosage = dto.Dosage;
             if (dto.Notes != null) userMed.Notes = dto.Notes;
             if (dto.StartDate.HasValue) userMed.StartDate = DateOnly.FromDateTime(dto.StartDate.Value);
@@ -160,7 +221,6 @@ namespace api_test.Controllers
             if (dto.FirstDoseTime.HasValue) userMed.FirstDoseTime = TimeOnly.FromTimeSpan(dto.FirstDoseTime.Value);
             if (dto.NotificationActive.HasValue) userMed.NotificationActive = dto.NotificationActive.Value;
 
-            // Scheduling — لو بعت intervalHours امسح الـ period والعكس
             if (dto.IntervalHours.HasValue)
             {
                 userMed.IntervalHours = dto.IntervalHours;
@@ -176,7 +236,6 @@ namespace api_test.Controllers
                 userMed.IntervalHours = null;
             }
 
-            // ExpiryDate فيها logic خاص للسوائل
             DateOnly? adjustedExpiry = null;
             DateOnly? originalExpiry = null;
             if (dto.ExpiryDate.HasValue)
@@ -188,7 +247,6 @@ namespace api_test.Controllers
 
             await _context.SaveChangesAsync();
 
-            // ✅ إعادة الجدولة لو في تغيير يأثر عليها
             bool scheduleChanged = dto.IntervalHours.HasValue
                 || dto.DosesPerPeriod.HasValue
                 || dto.PeriodUnit != null
@@ -328,10 +386,6 @@ namespace api_test.Controllers
             return int.Parse(claim.Value);
         }
 
-        /// <summary>
-        /// لو الدواء سائل → ينقص 3 شهور من تاريخ الصلاحية
-        /// عشان فتح العلبة بيقلل العمر الافتراضي
-        /// </summary>
         private static DateOnly? AdjustExpiryForLiquid(DateOnly? originalExpiry, string? dosageForm)
         {
             if (string.IsNullOrWhiteSpace(dosageForm) || originalExpiry == null)

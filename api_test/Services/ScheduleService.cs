@@ -24,7 +24,6 @@ namespace api_test.Services
 
         public async Task RegenerateScheduleAsync(UserMedication userMed)
         {
-            // احذف المواعيد المستقبلية بس (اللي لسه مجاتش)
             var futureSchedules = await _context.MedicationSchedules
                 .Where(s => s.UserMedicationId == userMed.Id
                          && s.ScheduledAt > DateTime.UtcNow)
@@ -36,14 +35,20 @@ namespace api_test.Services
                 await _context.SaveChangesAsync();
             }
 
-            // اعمل جدولة جديدة من دلوقتي للأمام
             await GenerateScheduleAsync(userMed, fromNow: true);
         }
 
         public async Task GenerateScheduleAsync(UserMedication userMed)
             => await GenerateScheduleAsync(userMed, fromNow: false);
 
-        // ✅ الـ method الأساسية — fromNow بتتحكم في نقطة البداية
+        /// <summary>
+        /// Called by the controller when the request contains custom dose times.
+        /// Generates exact-time schedules then falls back to nothing (legacy path not needed).
+        /// </summary>
+        public async Task GenerateScheduleWithDoseTimesAsync(UserMedication userMed, List<TimeOnly> doseTimes)
+            => await GenerateCustomTimesScheduleAsync(userMed, doseTimes, fromNow: false);
+
+        // ✅ Main generation method — interval / period modes (legacy)
         private async Task GenerateScheduleAsync(UserMedication userMed, bool fromNow)
         {
             if (!userMed.StartDate.HasValue || !userMed.FirstDoseTime.HasValue)
@@ -55,7 +60,6 @@ namespace api_test.Services
             DateTime start = TimeZoneInfo.ConvertTimeToUtc(localStart, CairoZone);
             start = DateTime.SpecifyKind(start, DateTimeKind.Utc);
 
-            // ✅ لو Regenerate وكان StartDate في الماضي → ابدأ من دلوقتي
             if (fromNow && start < DateTime.UtcNow)
                 start = DateTime.UtcNow;
 
@@ -101,6 +105,50 @@ namespace api_test.Services
 
             await _context.MedicationSchedules.AddRangeAsync(schedules);
             await _context.SaveChangesAsync();
+        }
+
+        /// <summary>
+        /// Generates one MedicationSchedule per dose time per day between
+        /// StartDate and EndDate (inclusive on both ends).
+        /// </summary>
+        private async Task GenerateCustomTimesScheduleAsync(
+            UserMedication userMed,
+            List<TimeOnly> doseTimes,
+            bool fromNow)
+        {
+            if (!userMed.StartDate.HasValue)
+                return;
+
+            var schedules = new List<MedicationSchedule>();
+
+            DateOnly startDate = userMed.StartDate.Value;
+            DateOnly endDate = userMed.EndDate.HasValue
+                ? userMed.EndDate.Value
+                : startDate.AddYears(1);
+
+            var nowUtc = DateTime.UtcNow;
+
+            for (var date = startDate; date <= endDate; date = date.AddDays(1))
+            {
+                foreach (var time in doseTimes)
+                {
+                    DateTime localDt = date.ToDateTime(time);
+                    DateTime utcDt = TimeZoneInfo.ConvertTimeToUtc(localDt, CairoZone);
+                    utcDt = DateTime.SpecifyKind(utcDt, DateTimeKind.Utc);
+
+                    // Skip past slots when regenerating
+                    if (fromNow && utcDt <= nowUtc)
+                        continue;
+
+                    schedules.Add(BuildEntry(userMed.Id, utcDt));
+                }
+            }
+
+            if (schedules.Count > 0)
+            {
+                await _context.MedicationSchedules.AddRangeAsync(schedules);
+                await _context.SaveChangesAsync();
+            }
         }
 
         // =====================================================================
@@ -189,24 +237,9 @@ namespace api_test.Services
                         .GetInteractionsForUserMedication(userId, medId);
                 }
 
-                var medInteractions = interactionCache[medId];
-
-                result.Add(new MedicationScheduleDto
-                {
-                    Id = schedule.Id,
-                    UserMedId = schedule.UserMedicationId,
-                    MedId = medId,
-                    MedName = schedule.UserMedication.Medication?.Trade_name ?? string.Empty,
-                    ScheduledAt = schedule.ScheduledAt.ToString("yyyy-MM-ddTHH:mm:ssZ"),
-                    NotificationTime = schedule.NotificationTime.HasValue
-                        ? schedule.NotificationTime.Value.ToString("yyyy-MM-ddTHH:mm:ssZ")
-                        : string.Empty,
-                    Status = schedule.Status ?? string.Empty,
-                    ReminderSent = schedule.ReminderSent,
-                    SnoozeCount = schedule.SnoozeCount,
-                    HasInteractions = medInteractions.Any(),
-                    Interactions = medInteractions
-                });
+                var dto = ToScheduleDto(schedule);
+                dto.Interactions = interactionCache[medId];
+                result.Add(dto);
             }
 
             return result;

@@ -38,6 +38,25 @@ namespace api_test.Services
             await GenerateScheduleAsync(userMed, fromNow: true);
         }
 
+        /// <summary>
+        /// Deletes future Pending schedules and regenerates using exact custom dose times.
+        /// </summary>
+        public async Task RegenerateScheduleWithDoseTimesAsync(UserMedication userMed, List<TimeOnly> doseTimes)
+        {
+            var futureSchedules = await _context.MedicationSchedules
+                .Where(s => s.UserMedicationId == userMed.Id
+                         && s.ScheduledAt > DateTime.UtcNow)
+                .ToListAsync();
+
+            if (futureSchedules.Any())
+            {
+                _context.MedicationSchedules.RemoveRange(futureSchedules);
+                await _context.SaveChangesAsync();
+            }
+
+            await GenerateCustomTimesScheduleAsync(userMed, doseTimes, fromNow: true);
+        }
+
         public async Task GenerateScheduleAsync(UserMedication userMed)
             => await GenerateScheduleAsync(userMed, fromNow: false);
 
@@ -188,7 +207,8 @@ namespace api_test.Services
                     Title = a.Title,
                     Message = a.Message,
                     IsRead = a.IsRead,
-                    CreatedAt = a.CreatedAt.ToString("yyyy-MM-ddTHH:mm:ssZ")
+                    CreatedAt = a.CreatedAt.ToString("yyyy-MM-ddTHH:mm:ssZ"),
+                    ScheduledAt = a.ScheduledAt.ToString("yyyy-MM-ddTHH:mm:ssZ")
                 })
                 .ToListAsync();
         }
@@ -196,53 +216,35 @@ namespace api_test.Services
         public async Task<List<MedicationScheduleDto>> GetTodaySchedulesAsync(int userId)
         {
             var cairoNow = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, CairoZone);
-            var rangeStart = TimeZoneInfo.ConvertTimeToUtc(cairoNow.Date, CairoZone);
-            var rangeEnd = rangeStart.AddDays(1);
+            var todayStart = TimeZoneInfo.ConvertTimeToUtc(cairoNow.Date, CairoZone);
+            var todayEnd = todayStart.AddDays(1);
 
-            return await GetSchedulesWithInteractionsAsync(userId, rangeStart, rangeEnd);
-        }
-
-        public async Task<List<MedicationScheduleDto>> GetSchedulesByDateAsync(
-            int userId, DateOnly date)
-        {
-            var rangeStart = TimeZoneInfo.ConvertTimeToUtc(
-                date.ToDateTime(TimeOnly.MinValue), CairoZone);
-            var rangeEnd = rangeStart.AddDays(1);
-
-            return await GetSchedulesWithInteractionsAsync(userId, rangeStart, rangeEnd);
-        }
-
-        private async Task<List<MedicationScheduleDto>> GetSchedulesWithInteractionsAsync(
-            int userId, DateTime rangeStart, DateTime rangeEnd)
-        {
-            var schedules = await _context.MedicationSchedules
+            return await _context.MedicationSchedules
                 .Include(s => s.UserMedication)
                     .ThenInclude(um => um!.Medication)
                 .Where(s => s.UserMedication!.UserId == userId
-                         && s.ScheduledAt >= rangeStart
-                         && s.ScheduledAt < rangeEnd)
+                         && s.ScheduledAt >= todayStart
+                         && s.ScheduledAt < todayEnd)
                 .OrderBy(s => s.ScheduledAt)
+                .Select(s => ToScheduleDto(s))
                 .ToListAsync();
+        }
 
-            var interactionCache = new Dictionary<int, List<MedicationInteractionDto>>();
-            var result = new List<MedicationScheduleDto>();
+        public async Task<List<MedicationScheduleDto>> GetSchedulesByDateAsync(int userId, DateOnly date)
+        {
+            var localMidnight = date.ToDateTime(TimeOnly.MinValue);
+            var utcStart = TimeZoneInfo.ConvertTimeToUtc(localMidnight, CairoZone);
+            var utcEnd = utcStart.AddDays(1);
 
-            foreach (var schedule in schedules)
-            {
-                var medId = schedule.UserMedication!.MedId;
-
-                if (!interactionCache.ContainsKey(medId))
-                {
-                    interactionCache[medId] = await _interactionService
-                        .GetInteractionsForUserMedication(userId, medId);
-                }
-
-                var dto = ToScheduleDto(schedule);
-                dto.Interactions = interactionCache[medId];
-                result.Add(dto);
-            }
-
-            return result;
+            return await _context.MedicationSchedules
+                .Include(s => s.UserMedication)
+                    .ThenInclude(um => um!.Medication)
+                .Where(s => s.UserMedication!.UserId == userId
+                         && s.ScheduledAt >= utcStart
+                         && s.ScheduledAt < utcEnd)
+                .OrderBy(s => s.ScheduledAt)
+                .Select(s => ToScheduleDto(s))
+                .ToListAsync();
         }
 
         // =====================================================================
@@ -300,11 +302,17 @@ namespace api_test.Services
                 .ToListAsync();
             relatedAlerts.ForEach(a => a.IsRead = true);
 
+            // ── Stock deduction ───────────────────────────────────────────────
+            // Use PillsPerDose; fall back to 1 if not set.
+            // Never parse the Dosage string (e.g. "500mg") for stock deduction.
             int pillsDeducted = 0;
             if (userMed.CurrentPillCount.HasValue)
             {
-                pillsDeducted = ParsePillsPerDose(userMed.Dosage);
-                userMed.CurrentPillCount = Math.Max(0, userMed.CurrentPillCount.Value - pillsDeducted);
+                int pillsToDeduct = userMed.PillsPerDose ?? 1;
+                if (pillsToDeduct <= 0) pillsToDeduct = 1;
+
+                pillsDeducted = Math.Min(pillsToDeduct, userMed.CurrentPillCount.Value);
+                userMed.CurrentPillCount = Math.Max(0, userMed.CurrentPillCount.Value - pillsToDeduct);
             }
 
             bool lowStockAlertCreated = false;
@@ -381,19 +389,6 @@ namespace api_test.Services
         // =====================================================================
         // PRIVATE HELPERS
         // =====================================================================
-
-        private static int ParsePillsPerDose(string? dosage)
-        {
-            if (string.IsNullOrWhiteSpace(dosage)) return 1;
-
-            var numStr = new string(dosage.TrimStart()
-                                          .TakeWhile(c => char.IsDigit(c) || c == '.')
-                                          .ToArray());
-
-            return decimal.TryParse(numStr, out decimal n) && n > 0
-                ? (int)n
-                : 1;
-        }
 
         private static MedicationSchedule BuildEntry(int userMedId, DateTime scheduledAt)
             => new MedicationSchedule

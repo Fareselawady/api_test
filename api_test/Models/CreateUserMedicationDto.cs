@@ -12,13 +12,20 @@
         public int? CurrentPillCount { get; set; }
         public int? InitialPillCount { get; set; }
         public int? LowStockThreshold { get; set; }
+
+        /// <summary>
+        /// Number of pills/tablets taken per scheduled dose.
+        /// Must be greater than 0 if provided.
+        /// </summary>
+        public int? PillsPerDose { get; set; }
+
         public int? DosesPerPeriod { get; set; }
         public string? PeriodUnit { get; set; }
         public int? PeriodValue { get; set; }
         public int? IntervalHours { get; set; }
         public bool NotificationActive { get; set; } = true;
 
-        // ── NEW ────────────────────────────────────────────────────────────────
+        // ── Schedule ───────────────────────────────────────────────────────────
         /// <summary>
         /// Optional schedule type hint. Accepted values: "CustomTimes", "Interval", "Period".
         /// If omitted the backend infers the type from the other fields (backward compatible).

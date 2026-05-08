@@ -28,5 +28,11 @@ namespace api_test.Services
         Task<SnoozeResult> SnoozeAsync(int scheduleId, int requestingUserId);
 
         Task RegenerateScheduleAsync(UserMedication userMed);
+
+        /// <summary>
+        /// Deletes future Pending schedules and regenerates using exact custom dose times.
+        /// Called by PUT endpoints when scheduleType == "CustomTimes".
+        /// </summary>
+        Task RegenerateScheduleWithDoseTimesAsync(UserMedication userMed, List<TimeOnly> doseTimes);
     }
 }

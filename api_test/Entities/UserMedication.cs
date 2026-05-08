@@ -21,6 +21,12 @@
         public int? InitialPillCount { get; set; }
         public int? LowStockThreshold { get; set; }
 
+        /// <summary>
+        /// Number of pills/tablets taken per scheduled dose.
+        /// If null, TakeDose defaults to deducting 1 pill.
+        /// </summary>
+        public int? PillsPerDose { get; set; }
+
         public int? DosesPerPeriod { get; set; }
         public string? PeriodUnit { get; set; }
         public int? PeriodValue { get; set; }

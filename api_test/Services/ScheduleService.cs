@@ -12,6 +12,8 @@ namespace api_test.Services
         private static readonly TimeZoneInfo CairoZone =
             TimeZoneInfo.FindSystemTimeZoneById("Egypt Standard Time");
 
+        private const int MaxSnoozeCount = 2;
+
         public ScheduleService(AppDbContext context, IInteractionService interactionService)
         {
             _context = context;
@@ -24,14 +26,18 @@ namespace api_test.Services
 
         public async Task RegenerateScheduleAsync(UserMedication userMed)
         {
-            var futureSchedules = await _context.MedicationSchedules
+            var nowUtc = DateTime.UtcNow;
+
+            // Only delete future Pending schedules — preserve Taken and Missed.
+            var futurePending = await _context.MedicationSchedules
                 .Where(s => s.UserMedicationId == userMed.Id
-                         && s.ScheduledAt > DateTime.UtcNow)
+                         && s.ScheduledAt > nowUtc
+                         && s.Status == "Pending")
                 .ToListAsync();
 
-            if (futureSchedules.Any())
+            if (futurePending.Any())
             {
-                _context.MedicationSchedules.RemoveRange(futureSchedules);
+                _context.MedicationSchedules.RemoveRange(futurePending);
                 await _context.SaveChangesAsync();
             }
 
@@ -40,17 +46,22 @@ namespace api_test.Services
 
         /// <summary>
         /// Deletes future Pending schedules and regenerates using exact custom dose times.
+        /// Existing Taken/Missed schedules are preserved; new slots that collide with them are skipped.
         /// </summary>
         public async Task RegenerateScheduleWithDoseTimesAsync(UserMedication userMed, List<TimeOnly> doseTimes)
         {
-            var futureSchedules = await _context.MedicationSchedules
+            var nowUtc = DateTime.UtcNow;
+
+            // Only delete future Pending schedules — preserve Taken and Missed.
+            var futurePending = await _context.MedicationSchedules
                 .Where(s => s.UserMedicationId == userMed.Id
-                         && s.ScheduledAt > DateTime.UtcNow)
+                         && s.ScheduledAt > nowUtc
+                         && s.Status == "Pending")
                 .ToListAsync();
 
-            if (futureSchedules.Any())
+            if (futurePending.Any())
             {
-                _context.MedicationSchedules.RemoveRange(futureSchedules);
+                _context.MedicationSchedules.RemoveRange(futurePending);
                 await _context.SaveChangesAsync();
             }
 
@@ -147,6 +158,19 @@ namespace api_test.Services
 
             var nowUtc = DateTime.UtcNow;
 
+            // When regenerating, load the set of ScheduledAt values that are already
+            // covered by a Taken or Missed entry so we don't create duplicates.
+            HashSet<DateTime> handledSlots = new();
+            if (fromNow)
+            {
+                var existing = await _context.MedicationSchedules
+                    .Where(s => s.UserMedicationId == userMed.Id
+                             && (s.Status == "Taken" || s.Status == "Missed"))
+                    .Select(s => s.ScheduledAt)
+                    .ToListAsync();
+                handledSlots = existing.ToHashSet();
+            }
+
             for (var date = startDate; date <= endDate; date = date.AddDays(1))
             {
                 foreach (var time in doseTimes)
@@ -157,6 +181,10 @@ namespace api_test.Services
 
                     // Skip past slots when regenerating
                     if (fromNow && utcDt <= nowUtc)
+                        continue;
+
+                    // Skip slots already covered by a Taken or Missed entry
+                    if (handledSlots.Contains(utcDt))
                         continue;
 
                     schedules.Add(BuildEntry(userMed.Id, utcDt));
@@ -361,29 +389,73 @@ namespace api_test.Services
         {
             var schedule = await _context.MedicationSchedules
                 .Include(s => s.UserMedication)
-                    .ThenInclude(um => um.Medication)
                 .FirstOrDefaultAsync(s => s.Id == scheduleId
                                        && s.UserMedication!.UserId == requestingUserId);
 
             if (schedule is null) return SnoozeResult.NotFound();
+
             if (schedule.Status == "Taken") return SnoozeResult.AlreadyTaken();
             if (schedule.Status == "Missed") return SnoozeResult.AlreadyMissed();
+            if (schedule.Status != "Pending") return SnoozeResult.InvalidStatus(schedule.Status ?? "Unknown");
 
-            var now = DateTime.UtcNow;
-            var nextReminder = now.AddHours(1);
+            // Enforce snooze limit before incrementing
+            int currentSnoozeCount = schedule.SnoozeCount; // treat null as 0 (field is int, default 0)
+            if (currentSnoozeCount >= MaxSnoozeCount)
+                return SnoozeResult.LimitReached(scheduleId, currentSnoozeCount);
 
-            schedule.SnoozeCount++;
-            schedule.SnoozedUntil = nextReminder;
+            // Capture old values before mutation
+            DateTime oldScheduledAt = schedule.ScheduledAt;
+            DateTime oldNotificationTime = schedule.NotificationTime ?? schedule.ScheduledAt.AddMinutes(-15);
+
+            // Shift both scheduledAt and notificationTime by +1 hour for this occurrence only.
+            // This does NOT affect UserMedication.FirstDoseTime or any other schedule row.
+            DateTime newScheduledAt = oldScheduledAt.AddHours(1);
+            DateTime newNotificationTime = oldNotificationTime.AddHours(1);
+
+            schedule.ScheduledAt = newScheduledAt;
+            schedule.NotificationTime = newNotificationTime;
+            schedule.SnoozeCount = currentSnoozeCount + 1;
             schedule.ReminderSent = false;
-
-            var relatedAlerts = await _context.Alerts
-                .Where(a => a.MedicationScheduleId == scheduleId && !a.IsRead)
-                .ToListAsync();
-            relatedAlerts.ForEach(a => a.IsRead = true);
+            // Status stays "Pending" — do not change it
 
             await _context.SaveChangesAsync();
 
-            return SnoozeResult.Success(scheduleId, schedule.SnoozeCount, nextReminder);
+            return SnoozeResult.Success(
+                scheduleId: scheduleId,
+                snoozeCount: schedule.SnoozeCount,
+                oldScheduledAt: oldScheduledAt,
+                newScheduledAt: newScheduledAt,
+                oldNotificationTime: oldNotificationTime,
+                newNotificationTime: newNotificationTime
+            );
+        }
+
+        // =====================================================================
+        // SKIP DOSE
+        // =====================================================================
+
+        public async Task<SkipDoseResult> SkipDoseAsync(int scheduleId, int requestingUserId)
+        {
+            var schedule = await _context.MedicationSchedules
+                .Include(s => s.UserMedication)
+                .FirstOrDefaultAsync(s => s.Id == scheduleId
+                                       && s.UserMedication!.UserId == requestingUserId);
+
+            if (schedule is null) return SkipDoseResult.NotFound();
+
+            if (schedule.Status == "Taken") return SkipDoseResult.AlreadyTaken();
+            if (schedule.Status == "Missed") return SkipDoseResult.AlreadyMissed();
+            if (schedule.Status != "Pending") return SkipDoseResult.InvalidStatus(schedule.Status ?? "Unknown");
+
+            // Mark as Missed — no pill deduction, no schedule regeneration
+            schedule.Status = "Missed";
+
+            // Suppress any pending reminder for this schedule
+            schedule.ReminderSent = true;
+
+            await _context.SaveChangesAsync();
+
+            return SkipDoseResult.Success(scheduleId);
         }
 
         // =====================================================================

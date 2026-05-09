@@ -94,14 +94,32 @@ namespace api_test.Controllers
 
         // ── POST /api/schedules/{scheduleId}/snooze ───────────────────────────
         /// <summary>
-        /// Snooze a dose reminder for 1 hour.
-        /// Max 2 snoozes — after that the dose is marked as Missed automatically.
+        /// Snooze a pending dose reminder by 1 hour.
+        /// Maximum 2 snoozes per dose. Does not deduct pills or change status.
         /// </summary>
         [HttpPost("api/schedules/{scheduleId:int}/snooze")]
         public async Task<ActionResult<SnoozeResult>> SnoozeDose(int scheduleId)
         {
             var userId = GetUserId();
             var result = await _scheduleService.SnoozeAsync(scheduleId, userId);
+
+            if (!result.Succeeded)
+                return result.Error!.Contains("not found")
+                    ? NotFound(new { message = result.Error })
+                    : BadRequest(new { message = result.Error });
+
+            return Ok(result);
+        }
+
+        // ── POST /api/schedules/{scheduleId}/skip ─────────────────────────────
+        /// <summary>
+        /// Skip a pending dose. Marks it as Missed without deducting pills.
+        /// </summary>
+        [HttpPost("api/schedules/{scheduleId:int}/skip")]
+        public async Task<ActionResult<SkipDoseResult>> SkipDose(int scheduleId)
+        {
+            var userId = GetUserId();
+            var result = await _scheduleService.SkipDoseAsync(scheduleId, userId);
 
             if (!result.Succeeded)
                 return result.Error!.Contains("not found")

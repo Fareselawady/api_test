@@ -315,30 +315,61 @@ namespace api_test.Controllers
             // ── Apply schedule fields ─────────────────────────────────────────
             bool scheduleChanged = false;
 
+            // Compare StartDate / EndDate against stored values — only flag changed if the value actually differs.
+            if (dto.StartDate.HasValue)
+            {
+                var newStart = DateOnly.FromDateTime(dto.StartDate.Value);
+                if (userMed.StartDate != newStart)
+                    scheduleChanged = true;
+            }
+            if (dto.EndDate.HasValue)
+            {
+                var newEnd = DateOnly.FromDateTime(dto.EndDate.Value);
+                if (userMed.EndDate != newEnd)
+                    scheduleChanged = true;
+            }
+
             if (effectiveScheduleType == "CustomTimes" && hasCustomTimes)
             {
+                // Compare incoming doseTimes with the times currently stored in the entity.
+                // The entity stores FirstDoseTime; we compare sorted resolved list vs existing schedules
+                // by checking DosesPerPeriod count and FirstDoseTime as a lightweight proxy.
+                // For a precise comparison we compare the sorted TimeOnly list to what was in the DB.
+                var newFirst = resolvedDoseTimes![0];
+                var newCount = resolvedDoseTimes.Count;
+                if (userMed.FirstDoseTime != newFirst
+                    || userMed.DosesPerPeriod != newCount
+                    || userMed.PeriodUnit != "Day"
+                    || userMed.PeriodValue != 1
+                    || userMed.IntervalHours.HasValue)
+                {
+                    scheduleChanged = true;
+                }
+
                 // Derive scheduling fields from doseTimes
-                userMed.FirstDoseTime = resolvedDoseTimes![0];
-                userMed.DosesPerPeriod = resolvedDoseTimes.Count;
+                userMed.FirstDoseTime = newFirst;
+                userMed.DosesPerPeriod = newCount;
                 userMed.PeriodUnit = "Day";
                 userMed.PeriodValue = 1;
                 userMed.IntervalHours = null;
-                scheduleChanged = true;
             }
             else if (effectiveScheduleType == "Interval")
             {
                 if (dto.IntervalHours.HasValue)
                 {
+                    if (userMed.IntervalHours != dto.IntervalHours)
+                        scheduleChanged = true;
                     userMed.IntervalHours = dto.IntervalHours;
                     userMed.DosesPerPeriod = null;
                     userMed.PeriodUnit = null;
                     userMed.PeriodValue = null;
-                    scheduleChanged = true;
                 }
                 if (dto.FirstDoseTime.HasValue)
                 {
-                    userMed.FirstDoseTime = TimeOnly.FromTimeSpan(dto.FirstDoseTime.Value);
-                    scheduleChanged = true;
+                    var newTime = TimeOnly.FromTimeSpan(dto.FirstDoseTime.Value);
+                    if (userMed.FirstDoseTime != newTime)
+                        scheduleChanged = true;
+                    userMed.FirstDoseTime = newTime;
                 }
             }
             else
@@ -346,30 +377,35 @@ namespace api_test.Controllers
                 // Backward-compatible: no scheduleType hint, apply fields as before
                 if (dto.IntervalHours.HasValue)
                 {
+                    if (userMed.IntervalHours != dto.IntervalHours)
+                        scheduleChanged = true;
                     userMed.IntervalHours = dto.IntervalHours;
                     userMed.DosesPerPeriod = null;
                     userMed.PeriodUnit = null;
                     userMed.PeriodValue = null;
-                    scheduleChanged = true;
                 }
                 else if (dto.DosesPerPeriod.HasValue || dto.PeriodUnit != null || dto.PeriodValue.HasValue)
                 {
+                    if ((dto.DosesPerPeriod.HasValue && userMed.DosesPerPeriod != dto.DosesPerPeriod)
+                        || (dto.PeriodUnit != null && userMed.PeriodUnit != dto.PeriodUnit)
+                        || (dto.PeriodValue.HasValue && userMed.PeriodValue != dto.PeriodValue))
+                    {
+                        scheduleChanged = true;
+                    }
                     if (dto.DosesPerPeriod.HasValue) userMed.DosesPerPeriod = dto.DosesPerPeriod;
                     if (dto.PeriodUnit != null) userMed.PeriodUnit = dto.PeriodUnit;
                     if (dto.PeriodValue.HasValue) userMed.PeriodValue = dto.PeriodValue;
                     userMed.IntervalHours = null;
-                    scheduleChanged = true;
                 }
 
                 if (dto.FirstDoseTime.HasValue)
                 {
-                    userMed.FirstDoseTime = TimeOnly.FromTimeSpan(dto.FirstDoseTime.Value);
-                    scheduleChanged = true;
+                    var newTime = TimeOnly.FromTimeSpan(dto.FirstDoseTime.Value);
+                    if (userMed.FirstDoseTime != newTime)
+                        scheduleChanged = true;
+                    userMed.FirstDoseTime = newTime;
                 }
             }
-
-            if (dto.StartDate.HasValue || dto.EndDate.HasValue)
-                scheduleChanged = true;
 
             // ── Expiry ────────────────────────────────────────────────────────
             DateOnly? adjustedExpiry = null;
@@ -522,8 +558,6 @@ namespace api_test.Controllers
             // ── Apply all fields ──────────────────────────────────────────────
             userMed.Dosage = dto.Dosage;
             userMed.Notes = dto.Notes;
-            userMed.StartDate = dto.StartDate.HasValue ? DateOnly.FromDateTime(dto.StartDate.Value) : null;
-            userMed.EndDate = dto.EndDate.HasValue ? DateOnly.FromDateTime(dto.EndDate.Value) : null;
             userMed.ExpiryDate = adjustedExpiry;
             userMed.CurrentPillCount = dto.CurrentPillCount;
             userMed.InitialPillCount = dto.InitialPillCount;
@@ -534,19 +568,64 @@ namespace api_test.Controllers
             // which is a full-replace style endpoint like the original fields above)
             userMed.PillsPerDose = dto.PillsPerDose;
 
+            // ── Detect schedule-related changes ───────────────────────────────
+            bool scheduleChanged = false;
+
+            if (dto.StartDate.HasValue)
+            {
+                var newStart = DateOnly.FromDateTime(dto.StartDate.Value);
+                if (userMed.StartDate != newStart)
+                    scheduleChanged = true;
+                userMed.StartDate = newStart;
+            }
+            else
+            {
+                userMed.StartDate = null;
+            }
+
+            if (dto.EndDate.HasValue)
+            {
+                var newEnd = DateOnly.FromDateTime(dto.EndDate.Value);
+                if (userMed.EndDate != newEnd)
+                    scheduleChanged = true;
+                userMed.EndDate = newEnd;
+            }
+            else
+            {
+                userMed.EndDate = null;
+            }
+
             // ── Apply schedule fields ─────────────────────────────────────────
             if (effectiveScheduleType == "CustomTimes" && hasCustomTimes)
             {
-                userMed.FirstDoseTime = resolvedDoseTimes![0];
-                userMed.DosesPerPeriod = resolvedDoseTimes.Count;
+                var newFirst = resolvedDoseTimes![0];
+                var newCount = resolvedDoseTimes.Count;
+                if (userMed.FirstDoseTime != newFirst
+                    || userMed.DosesPerPeriod != newCount
+                    || userMed.PeriodUnit != "Day"
+                    || userMed.PeriodValue != 1
+                    || userMed.IntervalHours.HasValue)
+                {
+                    scheduleChanged = true;
+                }
+                userMed.FirstDoseTime = newFirst;
+                userMed.DosesPerPeriod = newCount;
                 userMed.PeriodUnit = "Day";
                 userMed.PeriodValue = 1;
                 userMed.IntervalHours = null;
             }
             else if (effectiveScheduleType == "Interval")
             {
+                if (dto.IntervalHours.HasValue && userMed.IntervalHours != dto.IntervalHours)
+                    scheduleChanged = true;
+                if (dto.FirstDoseTime.HasValue)
+                {
+                    var newTime = TimeOnly.FromTimeSpan(dto.FirstDoseTime.Value);
+                    if (userMed.FirstDoseTime != newTime)
+                        scheduleChanged = true;
+                    userMed.FirstDoseTime = newTime;
+                }
                 userMed.IntervalHours = dto.IntervalHours;
-                userMed.FirstDoseTime = dto.FirstDoseTime.HasValue ? TimeOnly.FromTimeSpan(dto.FirstDoseTime.Value) : userMed.FirstDoseTime;
                 userMed.DosesPerPeriod = null;
                 userMed.PeriodUnit = null;
                 userMed.PeriodValue = null;
@@ -554,20 +633,41 @@ namespace api_test.Controllers
             else
             {
                 // Backward-compatible path: apply fields directly
+                if (dto.DosesPerPeriod.HasValue && userMed.DosesPerPeriod != dto.DosesPerPeriod)
+                    scheduleChanged = true;
+                if (dto.PeriodUnit != null && userMed.PeriodUnit != dto.PeriodUnit)
+                    scheduleChanged = true;
+                if (dto.PeriodValue.HasValue && userMed.PeriodValue != dto.PeriodValue)
+                    scheduleChanged = true;
+                if (dto.IntervalHours.HasValue && userMed.IntervalHours != dto.IntervalHours)
+                    scheduleChanged = true;
+                if (dto.FirstDoseTime.HasValue)
+                {
+                    var newTime = TimeOnly.FromTimeSpan(dto.FirstDoseTime.Value);
+                    if (userMed.FirstDoseTime != newTime)
+                        scheduleChanged = true;
+                    userMed.FirstDoseTime = newTime;
+                }
+                else
+                {
+                    userMed.FirstDoseTime = null;
+                }
                 userMed.DosesPerPeriod = dto.DosesPerPeriod;
                 userMed.PeriodUnit = dto.PeriodUnit;
                 userMed.PeriodValue = dto.PeriodValue;
-                userMed.FirstDoseTime = dto.FirstDoseTime.HasValue ? TimeOnly.FromTimeSpan(dto.FirstDoseTime.Value) : null;
                 userMed.IntervalHours = dto.IntervalHours;
             }
 
             await _context.SaveChangesAsync();
 
-            // ── Generate/regenerate schedules ─────────────────────────────────
-            if (effectiveScheduleType == "CustomTimes" && hasCustomTimes)
-                await _scheduleService.RegenerateScheduleWithDoseTimesAsync(userMed, resolvedDoseTimes!);
-            else
-                await _scheduleService.GenerateScheduleAsync(userMed);
+            // ── Generate/regenerate schedules only when schedule fields changed ─
+            if (scheduleChanged)
+            {
+                if (effectiveScheduleType == "CustomTimes" && hasCustomTimes)
+                    await _scheduleService.RegenerateScheduleWithDoseTimesAsync(userMed, resolvedDoseTimes!);
+                else
+                    await _scheduleService.RegenerateScheduleAsync(userMed);
+            }
 
             bool expiryWasAdjusted = adjustedExpiry != originalExpiry;
 

@@ -27,6 +27,9 @@ namespace api_test.Services
         // ── Snooze ────────────────────────────────────────────────────────────
         Task<SnoozeResult> SnoozeAsync(int scheduleId, int requestingUserId);
 
+        // ── Skip ──────────────────────────────────────────────────────────────
+        Task<SkipDoseResult> SkipDoseAsync(int scheduleId, int requestingUserId);
+
         Task RegenerateScheduleAsync(UserMedication userMed);
 
         /// <summary>

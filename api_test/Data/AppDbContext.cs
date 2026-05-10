@@ -2,7 +2,6 @@
 using api_test.Models;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
-using System;
 
 namespace api_test.Data
 {
@@ -16,14 +15,18 @@ namespace api_test.Data
         public DbSet<MedicationSchedule> MedicationSchedules { get; set; }
         public DbSet<Alert> Alerts { get; set; }
         public DbSet<Role> Roles { get; set; }
-        public DbSet<User> Users { get; set; }  
+        public DbSet<User> Users { get; set; }
         public DbSet<UserMedication> UserMedications { get; set; }
         public DbSet<Medication> Medications { get; set; }
         public DbSet<Ingredient> Ingredients { get; set; }
         public DbSet<MedIngredientLink> Med_Ingredients_Link { get; set; }
         public DbSet<DrugInteraction> Drug_Interactions { get; set; }
         public DbSet<Survey> Surveys { get; set; }
-         public DbSet<AdminReply> AdminReplies { get; set; }
+        public DbSet<AdminReply> AdminReplies { get; set; }
+
+        // ── Feature 2: Support Tickets ────────────────────────────────────────
+        public DbSet<SupportTicket> SupportTickets { get; set; }
+
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             base.OnModelCreating(modelBuilder);
@@ -37,6 +40,7 @@ namespace api_test.Data
                 t => t == null ? null : t.Value.ToTimeSpan(),
                 t => t == null ? null : TimeOnly.FromTimeSpan(t.Value)
             );
+
             modelBuilder.Entity<UserMedication>(entity =>
             {
                 entity.Property(e => e.StartDate).HasConversion(dateOnlyConverter);
@@ -56,10 +60,10 @@ namespace api_test.Data
             });
 
             modelBuilder.Entity<MedIngredientLink>()
-            .HasOne(m => m.Medication)
-            .WithMany(d => d.Ingredients)
-            .HasForeignKey(m => m.Med_id)
-            .OnDelete(DeleteBehavior.Cascade);
+                .HasOne(m => m.Medication)
+                .WithMany(d => d.Ingredients)
+                .HasForeignKey(m => m.Med_id)
+                .OnDelete(DeleteBehavior.Cascade);
 
             modelBuilder.Entity<MedIngredientLink>()
                 .HasOne(m => m.Ingredient)
@@ -80,29 +84,27 @@ namespace api_test.Data
                 .OnDelete(DeleteBehavior.Restrict);
 
             modelBuilder.Entity<User>()
-               .HasMany(u => u.UserMedications)
-               .WithOne(d => d.User)
-               .HasForeignKey(d => d.UserId)
-               .OnDelete(DeleteBehavior.Cascade);
+                .HasMany(u => u.UserMedications)
+                .WithOne(d => d.User)
+                .HasForeignKey(d => d.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
 
-            
             modelBuilder.Entity<User>()
                 .HasOne(u => u.Role)
                 .WithMany(r => r.Users)
                 .HasForeignKey(u => u.RoleId)
                 .OnDelete(DeleteBehavior.Restrict);
 
-          
             modelBuilder.Entity<Role>().HasData(
                 new Role { RoleId = 1, RoleName = "Admin" },
                 new Role { RoleId = 2, RoleName = "Patient" }
             );
 
             modelBuilder.Entity<Alert>()
-             .HasOne(a => a.User)
-             .WithMany(u => u.Alerts)
-            .HasForeignKey(a => a.UserId)
-           .OnDelete(DeleteBehavior.NoAction);
+                .HasOne(a => a.User)
+                .WithMany(u => u.Alerts)
+                .HasForeignKey(a => a.UserId)
+                .OnDelete(DeleteBehavior.NoAction);
 
             modelBuilder.Entity<Alert>()
                 .HasOne(a => a.UserMedication)
@@ -117,18 +119,16 @@ namespace api_test.Data
                 .OnDelete(DeleteBehavior.NoAction);
 
             modelBuilder.Entity<UserMedication>()
-    .HasOne(um => um.Medication)
-    .WithMany(m => m.UserMedications)
-    .HasForeignKey(um => um.MedId) 
-    .OnDelete(DeleteBehavior.Cascade);
-
+                .HasOne(um => um.Medication)
+                .WithMany(m => m.UserMedications)
+                .HasForeignKey(um => um.MedId)
+                .OnDelete(DeleteBehavior.Cascade);
 
             modelBuilder.Entity<MedicationSchedule>()
                 .HasOne(ms => ms.UserMedication)
                 .WithMany(um => um.MedicationSchedules)
                 .HasForeignKey(ms => ms.UserMedicationId)
                 .OnDelete(DeleteBehavior.Cascade);
-
 
             modelBuilder.Entity<Survey>()
                 .HasOne(s => s.User)
@@ -142,7 +142,16 @@ namespace api_test.Data
                 .HasForeignKey(r => r.UserId)
                 .OnDelete(DeleteBehavior.Cascade);
 
-        }
+            // ── SupportTicket ─────────────────────────────────────────────────
+            modelBuilder.Entity<SupportTicket>()
+                .HasOne(t => t.User)
+                .WithMany()
+                .HasForeignKey(t => t.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
 
+            // Store enums as int (EF Core default) — no extra config needed.
+            // IsPremium / PremiumStartDate / PremiumEndDate are plain scalar columns
+            // on User — EF Core picks them up automatically.
+        }
     }
 }

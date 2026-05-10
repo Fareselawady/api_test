@@ -1,0 +1,97 @@
+﻿using api_test.Data;
+using api_test.Models;
+using api_test.Services;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
+using System.Security.Claims;
+
+namespace api_test.Controllers
+{
+    [ApiController]
+    [Authorize]
+    public class NotificationsController : ControllerBase
+    {
+        private readonly AppDbContext _db;
+        private readonly IInteractionService _interactionService;
+
+        public NotificationsController(AppDbContext db, IInteractionService interactionService)
+        {
+            _db = db;
+            _interactionService = interactionService;
+        }
+
+        /// <summary>
+        /// GET /api/users/me/notification-schedules
+        /// Returns upcoming Pending schedules with all info Flutter needs
+        /// to schedule local (or push) notifications.
+        /// notificationTime = scheduledAt - 15 minutes.
+        /// </summary>
+        [HttpGet("api/users/me/notification-schedules")]
+        public async Task<ActionResult<List<NotificationScheduleDto>>> GetNotificationSchedules()
+        {
+            var userId = GetUserId();
+            var nowUtc = DateTime.UtcNow;
+
+            // Load all future pending schedules for this user
+            var schedules = await _db.MedicationSchedules
+                .Include(s => s.UserMedication)
+                    .ThenInclude(um => um.Medication)
+                .Where(s =>
+                    s.UserMedication!.UserId == userId &&
+                    s.Status == "Pending" &&
+                    s.ScheduledAt > nowUtc)
+                .OrderBy(s => s.ScheduledAt)
+                .ToListAsync();
+
+            // Build a map of medId → hasInteractions to avoid N+1 per schedule
+            var userMedIds = schedules
+                .Select(s => s.UserMedication!.MedId)
+                .Distinct()
+                .ToList();
+
+            var interactionMap = new Dictionary<int, bool>();
+            foreach (var medId in userMedIds)
+            {
+                var interactions = await _interactionService
+                    .GetInteractionsForUserMedication(userId, medId);
+                interactionMap[medId] = interactions.Count > 0;
+            }
+
+            var result = schedules.Select(s =>
+            {
+                var um = s.UserMedication!;
+
+                // Reuse stored NotificationTime if correct; otherwise calculate dynamically
+                DateTime notifTime = (s.NotificationTime.HasValue &&
+                    s.NotificationTime.Value == s.ScheduledAt.AddMinutes(-15))
+                    ? s.NotificationTime.Value
+                    : s.ScheduledAt.AddMinutes(-15);
+
+                return new NotificationScheduleDto
+                {
+                    ScheduleId = s.Id,
+                    UserMedId = um.Id,
+                    MedId = um.MedId,
+                    MedName = um.Medication?.Trade_name ?? string.Empty,
+                    ScheduledAt = s.ScheduledAt,
+                    NotificationTime = notifTime,
+                    Status = s.Status ?? "Pending",
+                    PillsPerDose = um.PillsPerDose,
+                    CurrentPillCount = um.CurrentPillCount,
+                    LowStockThreshold = um.LowStockThreshold,
+                    HasInteractions = interactionMap.GetValueOrDefault(um.MedId, false)
+                };
+            }).ToList();
+
+            return Ok(result);
+        }
+
+        private int GetUserId()
+        {
+            var claim = User.FindFirst(ClaimTypes.NameIdentifier)
+                ?? throw new UnauthorizedAccessException("NameIdentifier claim missing.");
+            return int.Parse(claim.Value);
+        }
+    }
+}

@@ -26,7 +26,7 @@ namespace api_test
             builder.Services.AddDbContext<AppDbContext>(options =>
                 options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
 
-          
+
             builder.Services.AddCors(options =>
             {
                 options.AddPolicy("AllowAll", policy =>
@@ -37,7 +37,7 @@ namespace api_test
                 });
             });
 
-           
+
             var key = Encoding.UTF8.GetBytes(builder.Configuration["AppSettings:Token"]!);
 
             builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
@@ -62,20 +62,23 @@ namespace api_test
             builder.Services.AddScoped<OtpService>();
             builder.Services.AddScoped<IScheduleService, ScheduleService>();
             builder.Services.AddScoped<IInteractionService, InteractionService>();
-
             builder.Services.AddScoped<IAlertService, AlertService>();
             builder.Services.AddHostedService<NotificationBackgroundService>();
+
+            // ======================
+            // Medicine Image Scanning
+            // ======================
+            builder.Services.AddHttpClient<IAIMedicineRecognitionService, AIMedicineRecognitionService>();
+
             var app = builder.Build();
 
-          
-
-            app.UseDeveloperExceptionPage(); // ›ﬁÿ √À‰«¡ «· ÿÊÌ—
+            app.UseDeveloperExceptionPage();
 
             app.UseMiddleware<VisitorLoggingMiddleware>();
 
-            app.UseHttpsRedirection(); // „—… Ê«Õœ… ›ﬁÿ
+            app.UseHttpsRedirection();
 
-            app.UseCors("AllowAll");   // ? ﬁ»· Authentication
+            app.UseCors("AllowAll");
 
             app.UseAuthentication();
             app.UseAuthorization();

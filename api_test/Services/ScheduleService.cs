@@ -247,15 +247,16 @@ namespace api_test.Services
             var todayStart = TimeZoneInfo.ConvertTimeToUtc(cairoNow.Date, CairoZone);
             var todayEnd = todayStart.AddDays(1);
 
-            return await _context.MedicationSchedules
+            var schedules = await _context.MedicationSchedules
                 .Include(s => s.UserMedication)
                     .ThenInclude(um => um!.Medication)
                 .Where(s => s.UserMedication!.UserId == userId
                          && s.ScheduledAt >= todayStart
                          && s.ScheduledAt < todayEnd)
                 .OrderBy(s => s.ScheduledAt)
-                .Select(s => ToScheduleDto(s))
                 .ToListAsync();
+
+            return await BuildDtosWithDayInteractionsAsync(userId, schedules);
         }
 
         public async Task<List<MedicationScheduleDto>> GetSchedulesByDateAsync(int userId, DateOnly date)
@@ -264,15 +265,16 @@ namespace api_test.Services
             var utcStart = TimeZoneInfo.ConvertTimeToUtc(localMidnight, CairoZone);
             var utcEnd = utcStart.AddDays(1);
 
-            return await _context.MedicationSchedules
+            var schedules = await _context.MedicationSchedules
                 .Include(s => s.UserMedication)
                     .ThenInclude(um => um!.Medication)
                 .Where(s => s.UserMedication!.UserId == userId
                          && s.ScheduledAt >= utcStart
                          && s.ScheduledAt < utcEnd)
                 .OrderBy(s => s.ScheduledAt)
-                .Select(s => ToScheduleDto(s))
                 .ToListAsync();
+
+            return await BuildDtosWithDayInteractionsAsync(userId, schedules);
         }
 
         // =====================================================================
@@ -461,6 +463,133 @@ namespace api_test.Services
         // =====================================================================
         // PRIVATE HELPERS
         // =====================================================================
+
+        /// <summary>
+        /// Builds schedule DTOs with drug interactions scoped only to the medications
+        /// that appear in the provided schedule list (i.e. scheduled on the same day).
+        /// A medication interacting with another medication NOT on the same day will
+        /// NOT appear in the interactions list.
+        ///
+        /// All DB queries are done up-front in a single batch before any iteration,
+        /// avoiding EF "second operation on same context" errors.
+        /// </summary>
+        private async Task<List<MedicationScheduleDto>> BuildDtosWithDayInteractionsAsync(
+            int userId,
+            List<MedicationSchedule> schedules)
+        {
+            // Always build the base DTOs first — never return empty due to interaction errors.
+            var baseDtos = schedules.Select(ToScheduleDto).ToList();
+
+            if (schedules.Count == 0)
+                return baseDtos;
+
+            try
+            {
+                // ── Step 1: distinct MedIds scheduled today ───────────────────
+                var dayMedIds = schedules
+                    .Where(s => s.UserMedication != null)
+                    .Select(s => s.UserMedication!.MedId)
+                    .Distinct()
+                    .ToList();
+
+                if (dayMedIds.Count == 0)
+                    return baseDtos;
+
+                // ── Step 2: load all ingredients for today's meds in one query ─
+                var dayIngredients = await _context.Med_Ingredients_Link
+                    .Where(m => dayMedIds.Contains(m.Med_id))
+                    .Select(m => new { m.Med_id, m.Ingredient_id })
+                    .ToListAsync();
+
+                // medId → list of ingredient IDs
+                var ingredientsByMed = dayIngredients
+                    .GroupBy(x => x.Med_id)
+                    .ToDictionary(g => g.Key, g => g.Select(x => x.Ingredient_id).ToList());
+
+                // ── Step 3: collect all ingredient IDs across today's meds ─────
+                var allDayIngredientIds = dayIngredients
+                    .Select(x => x.Ingredient_id)
+                    .Distinct()
+                    .ToList();
+
+                // ── Step 4: load all interactions in one query ────────────────
+                var allInteractions = await _context.Drug_Interactions
+                    .Where(di =>
+                        allDayIngredientIds.Contains(di.Ingredient_1_id!.Value) ||
+                        allDayIngredientIds.Contains(di.Ingredient_2_id!.Value))
+                    .Select(di => new
+                    {
+                        di.Ingredient_1_id,
+                        di.Ingredient_2_id,
+                        di.Interaction_type
+                    })
+                    .ToListAsync();
+
+                // ── Step 5: build MedId → trade name map for today's meds ─────
+                var medIdToName = schedules
+                    .Where(s => s.UserMedication?.Medication != null)
+                    .Select(s => new { s.UserMedication!.MedId, s.UserMedication.Medication.Trade_name })
+                    .Distinct()
+                    .ToDictionary(x => x.MedId, x => x.Trade_name ?? string.Empty);
+
+                // ── Step 6: for each today med, compute interactions only
+                //            against OTHER today meds ──────────────────────────
+                var interactionCache = new Dictionary<int, List<MedicationInteractionDto>>();
+
+                foreach (var medId in dayMedIds)
+                {
+                    var myIngredients = ingredientsByMed.GetValueOrDefault(medId, new List<int>());
+                    var result = new List<MedicationInteractionDto>();
+
+                    foreach (var otherMedId in dayMedIds)
+                    {
+                        if (otherMedId == medId) continue;
+
+                        var otherIngredients = ingredientsByMed.GetValueOrDefault(otherMedId, new List<int>());
+
+                        var matched = allInteractions
+                            .Where(di =>
+                                (myIngredients.Contains(di.Ingredient_1_id!.Value) &&
+                                 otherIngredients.Contains(di.Ingredient_2_id!.Value)) ||
+                                (myIngredients.Contains(di.Ingredient_2_id!.Value) &&
+                                 otherIngredients.Contains(di.Ingredient_1_id!.Value)))
+                            .Select(di => di.Interaction_type)
+                            .Where(t => !string.IsNullOrWhiteSpace(t))
+                            .ToList();
+
+                        if (matched.Count > 0)
+                        {
+                            result.Add(new MedicationInteractionDto
+                            {
+                                WithMedication = medIdToName.GetValueOrDefault(otherMedId, string.Empty),
+                                Reason = string.Join(", ", matched)
+                            });
+                        }
+                    }
+
+                    interactionCache[medId] = result;
+                }
+
+                // ── Step 7: stamp interactions onto each DTO ──────────────────
+                for (int i = 0; i < schedules.Count; i++)
+                {
+                    var medId = schedules[i].UserMedication?.MedId ?? 0;
+                    if (medId != 0 && interactionCache.TryGetValue(medId, out var interactions))
+                    {
+                        baseDtos[i].Interactions = interactions;
+                        baseDtos[i].HasInteractions = interactions.Count > 0;
+                    }
+                }
+            }
+            catch (Exception)
+            {
+                // If interaction enrichment fails for any reason,
+                // return the plain schedule DTOs rather than an empty list.
+                return baseDtos;
+            }
+
+            return baseDtos;
+        }
 
         private static MedicationSchedule BuildEntry(int userMedId, DateTime scheduledAt)
             => new MedicationSchedule

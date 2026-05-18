@@ -63,6 +63,7 @@ namespace api_test
             builder.Services.AddScoped<IScheduleService, ScheduleService>();
             builder.Services.AddScoped<IInteractionService, InteractionService>();
             builder.Services.AddScoped<IAlertService, AlertService>();
+            builder.Services.AddSingleton<ITranslationService, TranslationService>();
             builder.Services.AddHostedService<NotificationBackgroundService>();
 
             // ======================

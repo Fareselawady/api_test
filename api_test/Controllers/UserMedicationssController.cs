@@ -14,6 +14,7 @@ namespace api_test.Controllers
     [Authorize]
     public class UserMedicationsController : ControllerBase
     {
+        private readonly ITranslationService _translationService;
         private readonly AppDbContext _context;
         private readonly IScheduleService _scheduleService;
         private readonly IInteractionService _interactionService;
@@ -21,13 +22,14 @@ namespace api_test.Controllers
         public UserMedicationsController(
             AppDbContext context,
             IScheduleService scheduleService,
-            IInteractionService interactionService)
+            IInteractionService interactionService,
+            ITranslationService translationService)
         {
             _context = context;
             _scheduleService = scheduleService;
             _interactionService = interactionService;
+            _translationService = translationService;
         }
-
         // ================= CREATE (single-step) =================
         [HttpPost]
         public async Task<ActionResult> AddUserMedication(CreateUserMedicationDto dto)
@@ -160,7 +162,7 @@ namespace api_test.Controllers
 
         // ================= READ =================
         [HttpGet("myusermeds")]
-        public async Task<ActionResult> GetMyUserMedications()
+        public async Task<ActionResult> GetMyUserMedications([FromQuery] string lang = "en")
         {
             var userId = GetUserId();
 
@@ -169,12 +171,9 @@ namespace api_test.Controllers
                 .Where(um => um.UserId == userId)
                 .ToListAsync();
 
-            // Load all future pending schedules for this user's meds in one query
             var userMedIds = userMeds.Select(um => um.Id).ToList();
             var nowUtc = DateTime.UtcNow;
 
-            // Fetch raw (UserMedicationId, ScheduledAt) rows from DB — no grouping/Distinct in SQL
-            // then group and deduplicate in memory to avoid EF Core translation limitations.
             var rawScheduleRows = await _context.MedicationSchedules
                 .Where(s => userMedIds.Contains(s.UserMedicationId)
                          && s.Status == "Pending"
@@ -193,17 +192,43 @@ namespace api_test.Controllers
 
             foreach (var um in userMeds)
             {
-                var interactions = await _interactionService
-                    .GetInteractionsForUserMedication(userId, um.MedId);
+                var rawInteractions = await _interactionService
+     .GetInteractionsForUserMedication(userId, um.MedId);
 
-                // ── Infer scheduleType ────────────────────────────────────────
+                var interactions = rawInteractions.Select(i =>
+                {
+                    string translatedMedication =
+                        string.IsNullOrWhiteSpace(i.WithMedication)
+                            ? string.Empty
+                            : (
+                                _context.Medications
+                                    .Where(m => m.Trade_name == i.WithMedication)
+                                    .Select(m => _translationService.GetMedName(m.ID, lang))
+                                    .FirstOrDefault()
+                                ?? i.WithMedication
+                            );
+
+                    return new MedicationInteractionDto
+                    {
+                        WithMedication = translatedMedication,
+
+                        Reason = _translationService.GetInteractionReason(
+                            i.Reason ?? string.Empty,
+                            lang)
+                    };
+                }).ToList();
+
+                string translatedName = _translationService.GetMedName(um.MedId, lang);
+
+                string finalName = string.IsNullOrWhiteSpace(translatedName)
+     ? um.Medication.Trade_name ?? string.Empty
+     : translatedName;
+
                 string? scheduleType = InferScheduleType(um);
 
-                // ── Build doseTimes list ──────────────────────────────────────
                 List<string> doseTimes;
                 if (scheduleType == "CustomTimes" && scheduleTimeMap.TryGetValue(um.Id, out var times))
                 {
-                    // Convert UTC times back to Cairo local and format as HH:mm:ss
                     doseTimes = times
                         .OrderBy(t => t)
                         .Select(t => ConvertUtcTimeOfDayToCairoString(t))
@@ -219,7 +244,7 @@ namespace api_test.Controllers
                 {
                     Id = um.Id,
                     MedId = um.MedId,
-                    MedicationName = um.Medication.Trade_name,
+                    MedicationName = finalName,
                     Dosage = um.Dosage,
                     Notes = um.Notes,
                     StartDate = um.StartDate?.ToDateTime(TimeOnly.MinValue),

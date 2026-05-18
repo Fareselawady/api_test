@@ -19,10 +19,12 @@ namespace api_test.Controllers
 
         // ── GET /api/medications/{userMedId}/schedules ────────────────────────
         [HttpGet("api/medications/{userMedId:int}/schedules")]
-        public async Task<ActionResult<List<MedicationScheduleDto>>> GetSchedulesForMedication(int userMedId)
+        public async Task<ActionResult<List<MedicationScheduleDto>>> GetSchedulesForMedication(
+            int userMedId,
+            [FromQuery] string lang = "en")
         {
             var userId = GetUserId();
-            var schedules = await _scheduleService.GetSchedulesForMedicationAsync(userMedId, userId);
+            var schedules = await _scheduleService.GetSchedulesForMedicationAsync(userMedId, userId, lang);
 
             if (schedules.Count == 0)
                 return NotFound(new { message = $"No schedules found for medication {userMedId}, or access denied." });
@@ -32,24 +34,28 @@ namespace api_test.Controllers
 
         // ── GET /api/users/me/today-schedules (User) ──────────────────────────
         [HttpGet("api/users/me/today-schedules")]
-        public async Task<ActionResult<List<MedicationScheduleDto>>> GetMyTodaySchedules()
+        public async Task<ActionResult<List<MedicationScheduleDto>>> GetMyTodaySchedules(
+            [FromQuery] string lang = "en")
         {
             var userId = GetUserId();
-            return Ok(await _scheduleService.GetTodaySchedulesAsync(userId));
+            return Ok(await _scheduleService.GetTodaySchedulesAsync(userId, lang));
         }
 
         // ── GET /api/users/{userId}/today-schedules (Admin) ───────────────────
         [HttpGet("api/users/{userId:int}/today-schedules")]
         [Authorize(Roles = "Admin")]
-        public async Task<ActionResult<List<MedicationScheduleDto>>> GetTodaySchedulesForUser(int userId)
+        public async Task<ActionResult<List<MedicationScheduleDto>>> GetTodaySchedulesForUser(
+            int userId,
+            [FromQuery] string lang = "en")
         {
-            return Ok(await _scheduleService.GetTodaySchedulesAsync(userId));
+            return Ok(await _scheduleService.GetTodaySchedulesAsync(userId, lang));
         }
 
         // ── GET /api/users/me/schedules-by-date (User) ────────────────────────
         [HttpGet("api/users/me/schedules-by-date")]
         public async Task<ActionResult<List<MedicationScheduleDto>>> GetMySchedulesByDate(
-            [FromQuery] string? date)
+            [FromQuery] string? date,
+            [FromQuery] string lang = "en")
         {
             var userId = GetUserId();
 
@@ -59,14 +65,16 @@ namespace api_test.Controllers
             if (!DateOnly.TryParseExact(date, "yyyy-MM-dd", out var parsedDate))
                 return BadRequest(new { message = $"Invalid date format '{date}'. Use yyyy-MM-dd." });
 
-            return Ok(await _scheduleService.GetSchedulesByDateAsync(userId, parsedDate));
+            return Ok(await _scheduleService.GetSchedulesByDateAsync(userId, parsedDate, lang));
         }
 
         // ── GET /api/users/{userId}/schedules-by-date (Admin) ─────────────────
         [HttpGet("api/users/{userId:int}/schedules-by-date")]
         [Authorize(Roles = "Admin")]
         public async Task<ActionResult<List<MedicationScheduleDto>>> GetSchedulesByDateForUser(
-            int userId, [FromQuery] string? date)
+            int userId,
+            [FromQuery] string? date,
+            [FromQuery] string lang = "en")
         {
             if (string.IsNullOrWhiteSpace(date))
                 return BadRequest(new { message = "The 'date' query parameter is required. Example: ?date=2026-03-14" });
@@ -74,7 +82,7 @@ namespace api_test.Controllers
             if (!DateOnly.TryParseExact(date, "yyyy-MM-dd", out var parsedDate))
                 return BadRequest(new { message = $"Invalid date format '{date}'. Use yyyy-MM-dd." });
 
-            return Ok(await _scheduleService.GetSchedulesByDateAsync(userId, parsedDate));
+            return Ok(await _scheduleService.GetSchedulesByDateAsync(userId, parsedDate, lang));
         }
 
         // ── POST /api/schedules/{scheduleId}/take ─────────────────────────────
@@ -93,10 +101,6 @@ namespace api_test.Controllers
         }
 
         // ── POST /api/schedules/{scheduleId}/snooze ───────────────────────────
-        /// <summary>
-        /// Snooze a pending dose reminder by 1 hour.
-        /// Maximum 2 snoozes per dose. Does not deduct pills or change status.
-        /// </summary>
         [HttpPost("api/schedules/{scheduleId:int}/snooze")]
         public async Task<ActionResult<SnoozeResult>> SnoozeDose(int scheduleId)
         {
@@ -112,9 +116,6 @@ namespace api_test.Controllers
         }
 
         // ── POST /api/schedules/{scheduleId}/skip ─────────────────────────────
-        /// <summary>
-        /// Skip a pending dose. Marks it as Missed without deducting pills.
-        /// </summary>
         [HttpPost("api/schedules/{scheduleId:int}/skip")]
         public async Task<ActionResult<SkipDoseResult>> SkipDose(int scheduleId)
         {

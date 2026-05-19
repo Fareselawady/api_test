@@ -10,6 +10,11 @@ namespace api_test.Services
         public string? description { get; set; }
     }
 
+
+
+
+
+
     internal sealed class TranslationFile
     {
         public Dictionary<string, MedTranslation> medications { get; set; } = new();

@@ -1,6 +1,7 @@
 ﻿using api_test.Data;
 using api_test.Entities;
 using api_test.Models;
+using api_test.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -12,36 +13,63 @@ namespace api_test.Controllers
     [ApiController]
     public class MedicationsController : ControllerBase
     {
-       private readonly AppDbContext _context;
-        public MedicationsController(AppDbContext context)
+        private readonly AppDbContext _context;
+        private readonly ITranslationService _translationService;
+
+        public MedicationsController(AppDbContext context, ITranslationService translationService)
         {
             _context = context;
+            _translationService = translationService;
         }
 
 
         [AllowAnonymous]
         [HttpGet("all")]
-        public async Task<ActionResult> GetMedications()
+        public async Task<ActionResult> GetMedications([FromQuery] string lang = "en")
         {
             var medications = await _context.Medications
-     .Select(m => new
-     {
-         m.ID,
-         m.Trade_name,
-         m.Description,
-         m.Dosage_Form,
-         m.image_url,
+                .AsNoTracking()
+                .Select(m => new
+                {
+                    m.ID,
+                    m.Trade_name,
+                    m.Description,
+                    m.Dosage_Form,
+                    m.image_url,
 
-         Ingredients = m.Ingredients!
-             .Select(i => new {
-                 i.Ingredient.IngredientName,
-                 i.Strength_value,
-                 i.Strength_unit
-             })
-     })
-     .ToListAsync();
+                    Ingredients = m.Ingredients!
+                        .Select(i => new {
+                            i.Ingredient.IngredientName,
+                            i.Strength_value,
+                            i.Strength_unit
+                        })
+                })
+                .ToListAsync();
 
-            return Ok(medications);
+            var result = medications.Select(m =>
+            {
+                var translatedName = _translationService.GetMedName(m.ID, lang);
+                var translatedDescription = _translationService.GetMedDescription(m.ID, lang);
+                var translatedDosageForm = _translationService.GetDosageForm(m.Dosage_Form ?? string.Empty, lang);
+
+                return new
+                {
+                    m.ID,
+                    Trade_name = string.IsNullOrWhiteSpace(translatedName)
+                        ? m.Trade_name
+                        : translatedName,
+                    Description = string.IsNullOrWhiteSpace(translatedDescription)
+                        ? m.Description
+                        : translatedDescription,
+                    Dosage_Form = string.IsNullOrWhiteSpace(translatedDosageForm)
+                        ? m.Dosage_Form
+                        : translatedDosageForm,
+                    m.image_url,
+                    m.Ingredients
+                };
+            });
+
+            return Ok(result);
         }
 
         [Authorize]

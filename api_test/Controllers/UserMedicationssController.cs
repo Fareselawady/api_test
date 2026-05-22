@@ -32,7 +32,7 @@ namespace api_test.Controllers
         }
         // ================= CREATE (single-step) =================
         [HttpPost]
-        public async Task<ActionResult> AddUserMedication(CreateUserMedicationDto dto)
+        public async Task<ActionResult> AddUserMedication(CreateUserMedicationDto dto, [FromQuery] string lang = "en")
         {
             var userId = GetUserId();
 
@@ -95,8 +95,10 @@ namespace api_test.Controllers
             }
 
             // ── Find medication ───────────────────────────────────────────────
-            var medication = await _context.Medications
-                .FirstOrDefaultAsync(m => m.Trade_name == dto.MedicationName);
+            var medId_add = _translationService.FindMedIdByName(dto.MedicationName);
+            var medication = medId_add.HasValue
+                ? await _context.Medications.FirstOrDefaultAsync(m => m.ID == medId_add.Value)
+                : await _context.Medications.FirstOrDefaultAsync(m => m.Trade_name == dto.MedicationName);
 
             if (medication == null)
                 return NotFound(new { Message = $"Medication '{dto.MedicationName}' not found." });
@@ -144,7 +146,8 @@ namespace api_test.Controllers
                 await _scheduleService.GenerateScheduleAsync(userMed);
 
             var warnings = await _interactionService
-                .CheckInteractionsForNewMedAsync(userId, dto.MedicationName);
+    .CheckInteractionsForNewMedWithLangAsync(userId, medication.Trade_name!, lang);
+
 
             bool expiryWasAdjusted = adjustedExpiry != originalExpiry;
 
@@ -156,7 +159,9 @@ namespace api_test.Controllers
                 ExpiryAdjustedNote = expiryWasAdjusted
                     ? (string?)$"Expiry date adjusted from {originalExpiry:dd/MM/yyyy} to {adjustedExpiry:dd/MM/yyyy} because this is a liquid medication (opened shelf life = 3 months)."
                     : null,
-                InteractionWarnings = warnings.Count > 0 ? warnings : null
+                InteractionWarnings = warnings.Count > 0
+    ? warnings.Select(w => w.Reason).ToList()
+    : null
             });
         }
 
@@ -198,15 +203,18 @@ namespace api_test.Controllers
                 var interactions = rawInteractions.Select(i =>
                 {
                     string translatedMedication =
-                        string.IsNullOrWhiteSpace(i.WithMedication)
-                            ? string.Empty
-                            : (
-                                _context.Medications
-                                    .Where(m => m.Trade_name == i.WithMedication)
-                                    .Select(m => _translationService.GetMedName(m.ID, lang))
-                                    .FirstOrDefault()
-                                ?? i.WithMedication
-                            );
+    string.IsNullOrWhiteSpace(i.WithMedication)
+        ? string.Empty
+        : (
+            _context.Medications
+                .Where(m => m.Trade_name == i.WithMedication)
+                .Select(m => new { m.ID, m.Trade_name })
+                .FirstOrDefault() is { } med
+            ? (_translationService.GetMedName(med.ID, lang) is { Length: > 0 } tr
+                ? tr
+                : med.Trade_name ?? i.WithMedication)
+            : i.WithMedication
+          );
 
                     return new MedicationInteractionDto
                     {
@@ -486,12 +494,14 @@ namespace api_test.Controllers
 
         // ================= 2-STEP: INIT =================
         [HttpPost("init")]
-        public async Task<ActionResult> InitUserMedication(InitUserMedicationDto dto)
+        public async Task<ActionResult> InitUserMedication(InitUserMedicationDto dto , [FromQuery] string lang = "en")
         {
             var userId = GetUserId();
 
-            var medication = await _context.Medications
-                .FirstOrDefaultAsync(m => m.Trade_name == dto.MedicationName);
+            var medId_init = _translationService.FindMedIdByName(dto.MedicationName);
+            var medication = medId_init.HasValue
+                ? await _context.Medications.FirstOrDefaultAsync(m => m.ID == medId_init.Value)
+                : await _context.Medications.FirstOrDefaultAsync(m => m.Trade_name == dto.MedicationName);
 
             if (medication == null)
                 return NotFound(new { Message = $"Medication '{dto.MedicationName}' not found." });
@@ -510,9 +520,8 @@ namespace api_test.Controllers
 
             _context.UserMedications.Add(userMed);
             await _context.SaveChangesAsync();
-
             var warnings = await _interactionService
-                .CheckInteractionsForNewMedAsync(userId, dto.MedicationName);
+                .CheckInteractionsForNewMedWithLangAsync(userId, medication.Trade_name!, lang);
 
             return Ok(new
             {
@@ -520,7 +529,9 @@ namespace api_test.Controllers
                 UserMedicationId = userMed.Id,
                 MedicationName = medication.Trade_name,
                 DosageForm = medication.Dosage_Form,
-                InteractionWarnings = warnings.Count > 0 ? warnings : null
+                InteractionWarnings = warnings.Count > 0
+    ? warnings.Select(w => w.Reason).ToList()
+    : null
             });
         }
 

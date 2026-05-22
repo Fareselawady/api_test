@@ -10,11 +10,6 @@ namespace api_test.Services
         public string? description { get; set; }
     }
 
-
-
-
-
-
     internal sealed class TranslationFile
     {
         public Dictionary<string, MedTranslation> medications { get; set; } = new();
@@ -28,18 +23,19 @@ namespace api_test.Services
     public interface ITranslationService
     {
         string GetMedName(int medId, string lang);
-
         string? GetMedDescription(int medId, string lang);
-
         string GetInteractionReason(string reason, string lang);
-
         string GetNotificationTitle(string type, string lang,
-                                    int? retryCount = null, int? maxRetry = null);
-
+                                     int? retryCount = null, int? maxRetry = null);
         string GetNotificationMessage(string type, string lang,
-                                      string medName, string dosage);
-
+                                       string medName, string dosage);
         string GetDosageForm(string code, string lang);
+
+        /// <summary>
+        /// Looks up a medication ID by its translated name (any language).
+        /// Returns null if not found — caller falls back to DB trade-name search.
+        /// </summary>
+        int? FindMedIdByName(string name);
     }
 
     // ── Implementation ───────────────────────────────────────────────────────
@@ -82,82 +78,78 @@ namespace api_test.Services
 
         public string GetInteractionReason(string reason, string lang)
         {
-            if (string.IsNullOrWhiteSpace(reason))
-                return reason;
+            if (string.IsNullOrWhiteSpace(reason)) return reason;
 
             var t = GetFile(lang);
-            if (t is null)
-                return reason;
+            if (t is null) return reason;
 
             if (t.interactions.TryGetValue(reason.Trim(), out var exact))
                 return exact;
 
             var parts = reason.Split(',', StringSplitOptions.TrimEntries);
-
             var translated = parts.Select(part =>
-                t.interactions.TryGetValue(part, out var translatedPart)
-                    ? translatedPart
-                    : part);
+                t.interactions.TryGetValue(part, out var tr) ? tr : part);
 
             return string.Join("، ", translated);
         }
 
-        public string GetNotificationTitle(
-            string type,
-            string lang,
-            int? retryCount = null,
-            int? maxRetry = null)
+        public string GetNotificationTitle(string type, string lang,
+                                           int? retryCount = null, int? maxRetry = null)
         {
             var t = GetFile(lang);
-            if (t is null)
-                return type;
+            if (t is null) return type;
 
-            if (retryCount.HasValue &&
-                maxRetry.HasValue &&
-                t.notifications.TryGetValue("DoseReminderRetry", out var retryTemplate))
+            if (retryCount.HasValue && maxRetry.HasValue
+                && t.notifications.TryGetValue("DoseReminderRetry", out var retryTpl))
             {
-                return retryTemplate
+                return retryTpl
                     .Replace("{0}", retryCount.Value.ToString())
                     .Replace("{1}", maxRetry.Value.ToString());
             }
 
-            return t.notifications.TryGetValue(type, out var title)
-                ? title
-                : type;
+            return t.notifications.TryGetValue(type, out var title) ? title : type;
         }
 
-        public string GetNotificationMessage(
-            string type,
-            string lang,
-            string medName,
-            string dosage)
+        public string GetNotificationMessage(string type, string lang,
+                                             string medName, string dosage)
         {
             var t = GetFile(lang);
-            if (t is null)
-                return string.Empty;
+            if (t is null) return string.Empty;
 
             var key = $"{type}Message";
-
-            if (!t.notifications.TryGetValue(key, out var template))
+            if (!t.notifications.TryGetValue(key, out var tpl))
                 return string.Empty;
 
-            return template
+            return tpl
                 .Replace("{0}", medName)
                 .Replace("{1}", dosage);
         }
 
         public string GetDosageForm(string code, string lang)
         {
-            if (string.IsNullOrWhiteSpace(code))
-                return code;
+            if (string.IsNullOrWhiteSpace(code)) return code;
 
             var t = GetFile(lang);
-            if (t is null)
-                return code;
+            if (t is null) return code;
 
-            return t.dosageForms.TryGetValue(code.Trim(), out var translated)
-                ? translated
-                : code;
+            return t.dosageForms.TryGetValue(code.Trim(), out var form) ? form : code;
+        }
+
+        public int? FindMedIdByName(string name)
+        {
+            if (string.IsNullOrWhiteSpace(name)) return null;
+
+            foreach (var lang in _langs.Values)
+            {
+                var match = lang.medications.FirstOrDefault(x =>
+                    x.Value.name?.Trim().Equals(
+                        name.Trim(), StringComparison.OrdinalIgnoreCase) == true);
+
+                if (match.Key != null)
+                    return int.Parse(match.Key);
+            }
+
+            return null;
         }
 
         // ── Private helpers ──────────────────────────────────────────────────
@@ -167,17 +159,12 @@ namespace api_test.Services
             if (string.IsNullOrWhiteSpace(lang) || lang.ToLower() == "en")
                 return null;
 
-            return _langs.TryGetValue(lang.ToLower(), out var file)
-                ? file
-                : null;
+            return _langs.TryGetValue(lang.ToLower(), out var file) ? file : null;
         }
 
         private void LoadLanguage(string lang, IWebHostEnvironment env)
         {
-            var path = Path.Combine(
-                env.ContentRootPath,
-                "Resources",
-                $"{lang}.json");
+            var path = Path.Combine(env.ContentRootPath, "Resources", $"{lang}.json");
 
             if (!File.Exists(path))
             {
@@ -188,30 +175,21 @@ namespace api_test.Services
             try
             {
                 var json = File.ReadAllText(path);
-
-                var file = JsonSerializer.Deserialize<TranslationFile>(
-                    json,
-                    new JsonSerializerOptions
-                    {
-                        PropertyNameCaseInsensitive = true
-                    });
+                var file = JsonSerializer.Deserialize<TranslationFile>(json,
+                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
 
                 if (file is not null)
                 {
                     _langs[lang] = file;
-
                     _logger.LogInformation(
                         "Loaded {Count} medication translations for lang='{Lang}'",
-                        file.medications.Count,
-                        lang);
+                        file.medications.Count, lang);
                 }
             }
             catch (Exception ex)
             {
-                _logger.LogError(
-                    ex,
-                    "Failed to load translation file for lang='{Lang}'",
-                    lang);
+                _logger.LogError(ex,
+                    "Failed to load translation file for lang='{Lang}'", lang);
             }
         }
     }

@@ -18,5 +18,8 @@ namespace api_test.Services
         Task<List<string>> CheckInteractionsForNewMedAsync(int userId, string newMedName);
 
         Task<List<MedicationInteractionDto>>GetInteractionsForUserMedication(int userId, int medId);
+
+        Task<List<InteractionWarningDto>> CheckInteractionsForNewMedWithLangAsync(
+       int userId, string newMedName, string lang);
     }
 }

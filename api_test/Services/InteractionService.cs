@@ -7,10 +7,12 @@ namespace api_test.Services
     public class InteractionService : IInteractionService
     {
         private readonly AppDbContext _context;
+        private readonly ITranslationService _translation;
 
-        public InteractionService(AppDbContext context)
+        public InteractionService(AppDbContext context, ITranslationService translation)
         {
             _context = context;
+            _translation = translation;
         }
 
         /// <summary>
@@ -154,5 +156,76 @@ namespace api_test.Services
 
             return result;
         }
+
+
+        public async Task<List<InteractionWarningDto>> CheckInteractionsForNewMedWithLangAsync(
+        int userId, string newMedName, string lang)
+        {
+            var warnings = new List<InteractionWarningDto>();
+
+            var newMed = await _context.Medications
+                .FirstOrDefaultAsync(m => m.Trade_name == newMedName);
+            if (newMed == null) return warnings;
+
+            var newMedIngredients = await _context.Med_Ingredients_Link
+                .Where(m => m.Med_id == newMed.ID)
+                .Select(m => m.Ingredient_id)
+                .ToListAsync();
+            if (newMedIngredients.Count == 0) return warnings;
+
+            var existingMeds = await _context.UserMedications
+                .Where(um => um.UserId == userId && um.MedId != newMed.ID)
+                .Include(um => um.Medication)
+                .Select(um => new { um.Medication.ID, um.Medication.Trade_name })
+                .Distinct()
+                .ToListAsync();
+            if (existingMeds.Count == 0) return warnings;
+
+            foreach (var existing in existingMeds)
+            {
+                var existingIngredients = await _context.Med_Ingredients_Link
+                    .Where(m => m.Med_id == existing.ID)
+                    .Select(m => m.Ingredient_id)
+                    .ToListAsync();
+
+                var interactions = await _context.Drug_Interactions
+                    .Where(di =>
+                        (newMedIngredients.Contains(di.Ingredient_1_id!.Value) &&
+                         existingIngredients.Contains(di.Ingredient_2_id!.Value)) ||
+                        (newMedIngredients.Contains(di.Ingredient_2_id!.Value) &&
+                         existingIngredients.Contains(di.Ingredient_1_id!.Value)))
+                    .ToListAsync();
+
+                foreach (var interaction in interactions)
+                {
+                    // ترجمة الأسماء والسبب
+                    var translatedNew = _translation.GetMedName(newMed.ID, lang) is { Length: > 0 } tn
+                        ? tn : newMedName;
+
+                    var translatedWith = _translation.GetMedName(existing.ID, lang) is { Length: > 0 } tw
+                        ? tw : existing.Trade_name ?? string.Empty;
+
+                    var translatedReason = _translation.GetInteractionReason(
+                        interaction.Interaction_type ?? string.Empty, lang);
+
+                    // بناء الرسالة حسب اللغة
+                    var message = lang == "ar"
+                        ? $"تحذير: '{translatedNew}' قد يتفاعل مع '{translatedWith}' ({translatedReason})."
+                        : $"Warning: '{translatedNew}' may interact with '{translatedWith}' ({translatedReason}).";
+
+                    warnings.Add(new InteractionWarningDto
+                    {
+                        NewMedName = translatedNew,
+                        WithMedication = translatedWith,
+                        Reason = message
+                    });
+                }
+            }
+
+            return warnings;
+        }
+
+
+
     }
 }

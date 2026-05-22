@@ -4,10 +4,10 @@ namespace api_test.Services
 {
     public interface IAlertService
     {
-        Task<List<AlertDto>> GetAllAlertsAsync(int userId);
+        Task<List<AlertDto>> GetAllAlertsAsync(int userId, string lang = "en");
 
         /// <summary>الإشعارات الغير مقروءة بس</summary>
-        Task<List<AlertDto>> GetUnreadAlertsAsync(int userId);
+        Task<List<AlertDto>> GetUnreadAlertsAsync(int userId, string lang = "en");
 
         /// <summary>عدد الإشعارات الغير مقروءة (للـ badge)</summary>
         Task<int> GetUnreadCountAsync(int userId);

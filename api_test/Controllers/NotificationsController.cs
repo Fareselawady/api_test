@@ -14,11 +14,16 @@ namespace api_test.Controllers
     {
         private readonly AppDbContext _db;
         private readonly IInteractionService _interactionService;
+        private readonly ITranslationService _translation;
 
-        public NotificationsController(AppDbContext db, IInteractionService interactionService)
+        public NotificationsController(
+            AppDbContext db,
+            IInteractionService interactionService,
+            ITranslationService translation)
         {
             _db = db;
             _interactionService = interactionService;
+            _translation = translation;
         }
 
         /// <summary>
@@ -28,7 +33,8 @@ namespace api_test.Controllers
         /// notificationTime = scheduledAt - 15 minutes.
         /// </summary>
         [HttpGet("api/users/me/notification-schedules")]
-        public async Task<ActionResult<List<NotificationScheduleDto>>> GetNotificationSchedules()
+        public async Task<ActionResult<List<NotificationScheduleDto>>> GetNotificationSchedules(
+            [FromQuery] string lang = "en")
         {
             var userId = GetUserId();
             var nowUtc = DateTime.UtcNow;
@@ -68,12 +74,28 @@ namespace api_test.Controllers
                     ? s.NotificationTime.Value
                     : s.ScheduledAt.AddMinutes(-15);
 
+                var translatedName = _translation.GetMedName(um.MedId, lang);
+                var medName = string.IsNullOrWhiteSpace(translatedName)
+                    ? um.Medication?.Trade_name ?? string.Empty
+                    : translatedName;
+
                 return new NotificationScheduleDto
                 {
                     ScheduleId = s.Id,
                     UserMedId = um.Id,
                     MedId = um.MedId,
-                    MedName = um.Medication?.Trade_name ?? string.Empty,
+                    MedName = medName,
+                    Title = _translation.GetNotificationText(
+                        "DoseReminder",
+                        lang,
+                        "Dose Reminder"),
+                    Message = _translation.GetNotificationText(
+                        "DoseReminderDueSoonMessage",
+                        lang,
+                        $"Reminder: your dose of \"{medName}\" is due in 15 minute(s) - {um.Dosage}",
+                        medName,
+                        "15",
+                        um.Dosage ?? string.Empty),
                     ScheduledAt = s.ScheduledAt,
                     NotificationTime = notifTime,
                     Status = s.Status ?? "Pending",

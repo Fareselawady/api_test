@@ -29,6 +29,8 @@ namespace api_test.Services
                                      int? retryCount = null, int? maxRetry = null);
         string GetNotificationMessage(string type, string lang,
                                        string medName, string dosage);
+        string GetNotificationText(string key, string lang, string fallback,
+                                   params string[] args);
         string GetDosageForm(string code, string lang);
 
         /// <summary>
@@ -96,33 +98,37 @@ namespace api_test.Services
         public string GetNotificationTitle(string type, string lang,
                                            int? retryCount = null, int? maxRetry = null)
         {
-            var t = GetFile(lang);
-            if (t is null) return type;
-
             if (retryCount.HasValue && maxRetry.HasValue
-                && t.notifications.TryGetValue("DoseReminderRetry", out var retryTpl))
-            {
-                return retryTpl
-                    .Replace("{0}", retryCount.Value.ToString())
-                    .Replace("{1}", maxRetry.Value.ToString());
-            }
+                && string.Equals(type, "DoseReminderRetry", StringComparison.OrdinalIgnoreCase))
+                return GetNotificationText(
+                    "DoseReminderRetry",
+                    lang,
+                    $"Dose Reminder (retry {retryCount.Value}/{maxRetry.Value})",
+                    retryCount.Value.ToString(),
+                    maxRetry.Value.ToString());
 
-            return t.notifications.TryGetValue(type, out var title) ? title : type;
+            return GetNotificationText(type, lang, type);
         }
 
         public string GetNotificationMessage(string type, string lang,
                                              string medName, string dosage)
         {
-            var t = GetFile(lang);
-            if (t is null) return string.Empty;
-
             var key = $"{type}Message";
-            if (!t.notifications.TryGetValue(key, out var tpl))
-                return string.Empty;
+            return GetNotificationText(key, lang, string.Empty, medName, dosage);
+        }
 
-            return tpl
-                .Replace("{0}", medName)
-                .Replace("{1}", dosage);
+        public string GetNotificationText(string key, string lang, string fallback,
+                                          params string[] args)
+        {
+            var t = GetFile(lang);
+            var template = t is not null
+                && !string.IsNullOrWhiteSpace(key)
+                && t.notifications.TryGetValue(key, out var translated)
+                && !string.IsNullOrWhiteSpace(translated)
+                    ? translated
+                    : fallback;
+
+            return FormatTemplate(template, args);
         }
 
         public string GetDosageForm(string code, string lang)
@@ -160,6 +166,16 @@ namespace api_test.Services
                 return null;
 
             return _langs.TryGetValue(lang.ToLower(), out var file) ? file : null;
+        }
+
+        private static string FormatTemplate(string template, params string[] args)
+        {
+            var result = template ?? string.Empty;
+
+            for (var i = 0; i < args.Length; i++)
+                result = result.Replace($"{{{i}}}", args[i] ?? string.Empty);
+
+            return result;
         }
 
         private void LoadLanguage(string lang, IWebHostEnvironment env)

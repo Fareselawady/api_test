@@ -10,6 +10,8 @@
         public int UserMedId { get; set; }
         public int MedId { get; set; }
         public string MedName { get; set; } = string.Empty;
+        public string Title { get; set; } = string.Empty;
+        public string Message { get; set; } = string.Empty;
 
         /// <summary>UTC time when the dose should be taken.</summary>
         public DateTime ScheduledAt { get; set; }

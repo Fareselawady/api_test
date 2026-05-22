@@ -20,34 +20,38 @@ namespace api_test.Controllers
 
         // ── GET /api/users/me/alerts (User) ───────────────────────────────────
         [HttpGet("api/users/me/alerts")]
-        public async Task<ActionResult<List<AlertDto>>> GetMyAll()
+        public async Task<ActionResult<List<AlertDto>>> GetMyAll([FromQuery] string lang = "en")
         {
             var userId = GetUserId();
-            return Ok(await _alertService.GetAllAlertsAsync(userId));
+            return Ok(await _alertService.GetAllAlertsAsync(userId, lang));
         }
 
         // ── GET /api/users/{userId}/alerts (Admin) ────────────────────────────
         [HttpGet("api/users/{userId:int}/alerts")]
         [Authorize(Roles = "Admin")]
-        public async Task<ActionResult<List<AlertDto>>> GetAllForUser(int userId)
+        public async Task<ActionResult<List<AlertDto>>> GetAllForUser(
+            int userId,
+            [FromQuery] string lang = "en")
         {
-            return Ok(await _alertService.GetAllAlertsAsync(userId));
+            return Ok(await _alertService.GetAllAlertsAsync(userId, lang));
         }
 
         // ── GET /api/users/me/alerts/unread (User) ────────────────────────────
         [HttpGet("api/users/me/alerts/unread")]
-        public async Task<ActionResult<List<AlertDto>>> GetMyUnread()
+        public async Task<ActionResult<List<AlertDto>>> GetMyUnread([FromQuery] string lang = "en")
         {
             var userId = GetUserId();
-            return Ok(await _alertService.GetUnreadAlertsAsync(userId));
+            return Ok(await _alertService.GetUnreadAlertsAsync(userId, lang));
         }
 
         // ── GET /api/users/{userId}/alerts/unread (Admin) ─────────────────────
         [HttpGet("api/users/{userId:int}/alerts/unread")]
         [Authorize(Roles = "Admin")]
-        public async Task<ActionResult<List<AlertDto>>> GetUnreadForUser(int userId)
+        public async Task<ActionResult<List<AlertDto>>> GetUnreadForUser(
+            int userId,
+            [FromQuery] string lang = "en")
         {
-            return Ok(await _alertService.GetUnreadAlertsAsync(userId));
+            return Ok(await _alertService.GetUnreadAlertsAsync(userId, lang));
         }
 
         // ── GET /api/users/me/alerts/unread-count (User) ──────────────────────

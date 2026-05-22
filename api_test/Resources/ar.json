@@ -201,7 +201,44 @@
   "notifications": {
     "DoseReminder": "تذكير بالجرعة",
     "DoseReminderRetry": "تذكير بالجرعة (محاولة {0}/{1})",
-    "DoseReminderMessage": "لا تنسَ جرعتك من \"{0}\" - {1}"
+    "DoseReminderSnooze": "تذكير بالجرعة (غفوة {0}/{1})",
+    "DoseReminderMessage": "لا تنسَ جرعتك من \"{0}\" - {1}",
+    "DoseReminderRetryMessage": "لا تنسَ جرعتك من \"{0}\" - {1}",
+    "DoseReminderSnoozeMessage": "تذكير: حان وقت تناول جرعتك من \"{0}\" - {1}",
+    "DoseReminderDueNowMessage": "حان وقت تناول جرعتك من \"{0}\" - {1}",
+    "DoseReminderDueSoonMessage": "تذكير: جرعتك من \"{0}\" مستحقة خلال {1} دقيقة - {2}",
+
+    "MissedDose": "جرعة فائتة",
+    "MissedDoseMessage": "لقد فاتتك جرعة \"{0}\". يرجى مراجعة جدولك.",
+
+    "ExpiryWarningToday": "الدواء ينتهي اليوم!",
+    "ExpiryWarningSoon": "دواء على وشك الانتهاء",
+    "ExpiryWarningTodayMessage": "دواؤك \"{0}\" ينتهي اليوم ({2}).",
+    "ExpiryWarningSoonMessage": "دواؤك \"{0}\" سينتهي خلال {1} يوم/أيام بتاريخ {2}.",
+
+    "LowStock": "انخفاض مخزون الدواء",
+    "LowStockMessage": "\"{0}\" أوشك على النفاد. المتبقي: {1} قرص/أقراص (الحد الأدنى: {2}).",
+
+    "PremiumActivated": "تم تفعيل الاشتراك المميز",
+    "PremiumActivatedMessage": "اشتراكك المميز فعال حتى {0}.",
+    "PremiumCancelled": "تم إلغاء الاشتراك المميز",
+    "PremiumCancelledMessage": "تم إلغاء اشتراكك المميز.",
+
+    "SupportRequestSubmitted": "تم إرسال طلب الدعم",
+    "SupportRequestSubmittedMessage": "تم إرسال طلب الدعم الخاص بك بنجاح.",
+    "SupportReply": "رد المسؤول على طلب الدعم الخاص بك",
+    "SupportReplyMessage": "قام المسؤول بالرد على طلب الدعم الخاص بك.",
+
+    "AdminReply": "رسالة جديدة من المسؤول",
+    "AdminMessage": "رسالة من الإدارة",
+    "AdminMessageMessage": "لديك رسالة جديدة من الإدارة.",
+
+    "NewSurvey": "{0} جديد من {1}",
+    "NewSurveyMessage": "المستخدم \"{0}\" (المعرف: {1}) أرسل {2}: {3}",
+    "SurveyType_GeneralFeedback": "تقييم عام",
+    "SurveyType_Complaint": "شكوى",
+    "SurveyType_MedicationRequest": "طلب دواء",
+    "SurveyType_Other": "طلب آخر"
   },
 
   "dosageForms": {

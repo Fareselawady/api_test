@@ -91,9 +91,7 @@ namespace api_test.Controllers
 
             return Ok(new { message = "User updated successfully" });
         }
-        //  [Authorize(Roles = "Admin")]
-        [AllowAnonymous ]
-
+        [Authorize(Roles = "Admin")]
         [HttpGet("all-users")]
         public async Task<IActionResult> GetAllUsers()
         {
@@ -109,6 +107,10 @@ namespace api_test.Controllers
                     u.BirthDate,
                     u.Gender,
                     u.CreatedAt,
+                    u.IsEmailVerified,
+                    u.IsPremium,
+                    u.PremiumStartDate,
+                    u.PremiumEndDate,
                     Role = new { u.Role.RoleId, u.Role.RoleName }
                 })
                 .ToListAsync();

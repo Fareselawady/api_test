@@ -174,6 +174,47 @@ namespace api_test.Controllers
         }
 
         [Authorize(Roles = "Admin")]
+        [HttpPut("{id:int}")]
+        public async Task<IActionResult> UpdateMedication(int id, CreateMedicationDto dto)
+        {
+            var medication = await _context.Medications
+                .FirstOrDefaultAsync(m => m.ID == id);
+
+            if (medication == null)
+                return NotFound(new { Message = "Medication not found." });
+
+            if (string.IsNullOrWhiteSpace(dto.TradeName))
+                return BadRequest(new { Message = "Trade name is required." });
+
+            var normalizedName = dto.TradeName.Trim();
+            var exists = await _context.Medications
+                .AnyAsync(m => m.ID != id && m.Trade_name == normalizedName);
+
+            if (exists)
+                return BadRequest(new { Message = "Medication with this name already exists." });
+
+            medication.Trade_name = normalizedName;
+            medication.Description = dto.Description;
+            medication.Dosage_Form = dto.DosageForm;
+            medication.image_url = dto.ImageUrl;
+
+            await _context.SaveChangesAsync();
+
+            return Ok(new
+            {
+                Message = "Medication updated successfully.",
+                Medication = new
+                {
+                    medication.ID,
+                    medication.Trade_name,
+                    medication.Description,
+                    medication.Dosage_Form,
+                    medication.image_url
+                }
+            });
+        }
+
+        [Authorize(Roles = "Admin")]
         [HttpDelete("delete/{id}")]
         public async Task<IActionResult> DeleteMedication(int id)
         {

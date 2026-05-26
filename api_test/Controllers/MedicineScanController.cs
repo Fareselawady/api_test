@@ -1,6 +1,9 @@
-﻿using api_test.Services;
+using api_test.Data;
+using api_test.Entities;
+using api_test.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using System.Security.Claims;
 
 namespace api_test.Controllers
 {
@@ -11,13 +14,16 @@ namespace api_test.Controllers
     {
         private readonly IAIMedicineRecognitionService _aiService;
         private readonly IConfiguration _configuration;
+        private readonly AppDbContext _db;
 
         public MedicineScanController(
             IAIMedicineRecognitionService aiService,
-            IConfiguration configuration)
+            IConfiguration configuration,
+            AppDbContext db)
         {
             _aiService = aiService;
             _configuration = configuration;
+            _db = db;
         }
 
         // ── POST /api/medicine-scan/image ────────────────────────────────────
@@ -43,7 +49,10 @@ namespace api_test.Controllers
             var result = await _aiService.ScanMedicineImageAsync(file);
 
             if (result.Success)
+            {
+                await SaveScanHistory(file, result, StatusCodes.Status200OK);
                 return Ok(result);
+            }
 
             bool isGatewayError =
                 result.Message.Contains("AI service returned an error", StringComparison.OrdinalIgnoreCase) ||
@@ -52,8 +61,12 @@ namespace api_test.Controllers
                 result.Message.Contains("not configured", StringComparison.OrdinalIgnoreCase);
 
             if (isGatewayError)
+            {
+                await SaveScanHistory(file, result, StatusCodes.Status502BadGateway);
                 return StatusCode(502, result);
+            }
 
+            await SaveScanHistory(file, result, StatusCodes.Status400BadRequest);
             return BadRequest(result);
         }
 
@@ -103,6 +116,24 @@ namespace api_test.Controllers
             }
         }
 
+        private async Task SaveScanHistory(IFormFile file, Models.MedicineScanResponseDto result, int statusCode)
+        {
+            var userId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
 
+            _db.MedicineScanHistories.Add(new MedicineScanHistory
+            {
+                UserId = userId,
+                FileName = file.FileName,
+                ContentType = file.ContentType,
+                FileSize = file.Length,
+                Success = result.Success,
+                MedicationName = result.MedicationName,
+                Message = result.Message,
+                HttpStatusCode = statusCode,
+                CreatedAt = DateTime.UtcNow
+            });
+
+            await _db.SaveChangesAsync();
+        }
     }
 }

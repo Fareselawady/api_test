@@ -26,6 +26,7 @@ namespace api_test.Data
 
         // ── Feature 2: Support Tickets ────────────────────────────────────────
         public DbSet<SupportTicket> SupportTickets { get; set; }
+        public DbSet<MedicineScanHistory> MedicineScanHistories { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {

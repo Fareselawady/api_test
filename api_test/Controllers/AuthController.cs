@@ -68,6 +68,15 @@ namespace api_test.Controllers
                 um.CurrentPillCount,
                 um.InitialPillCount,
                 um.LowStockThreshold,
+                DosageForm = string.IsNullOrWhiteSpace(um.DosageForm)
+                    ? um.Medication.Dosage_Form
+                    : um.DosageForm,
+                QuantityUnit = string.IsNullOrWhiteSpace(um.QuantityUnit)
+                    ? MedicationQuantityHelper.GetSuggestedUnit(um.DosageForm ?? um.Medication.Dosage_Form)
+                    : um.QuantityUnit,
+                InitialQuantity = MedicationQuantityHelper.ResolveQuantity(um.InitialQuantity, um.InitialPillCount),
+                CurrentQuantity = MedicationQuantityHelper.ResolveQuantity(um.CurrentQuantity, um.CurrentPillCount),
+                DoseQuantity = MedicationQuantityHelper.ResolveQuantity(um.DoseQuantity, um.PillsPerDose),
                 um.DosesPerPeriod,
                 um.PeriodUnit,
                 um.PeriodValue,

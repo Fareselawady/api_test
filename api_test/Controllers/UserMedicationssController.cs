@@ -55,28 +55,23 @@ namespace api_test.Controllers
             if (dto.PillsPerDose.HasValue && dto.PillsPerDose <= 0)
                 return BadRequest(new { Message = "pillsPerDose must be greater than 0." });
 
+            if (MedicationQuantityHelper.HasInvalidQuantity(dto.InitialQuantity))
+                return BadRequest(new { Message = "initialQuantity must not be negative." });
+
+            if (MedicationQuantityHelper.HasInvalidQuantity(dto.CurrentQuantity))
+                return BadRequest(new { Message = "currentQuantity must not be negative." });
+
+            if (MedicationQuantityHelper.HasInvalidDoseQuantity(dto.DoseQuantity))
+                return BadRequest(new { Message = "doseQuantity must be greater than 0." });
+
             // ── Resolve and validate custom dose times ────────────────────────
-            List<TimeOnly>? resolvedDoseTimes = null;
+            var resolvedDoseTimes = ResolveDoseTimes(dto.DoseTimes, out string? doseTimeError);
+            if (doseTimeError != null)
+                return BadRequest(new { Message = doseTimeError });
 
-            bool hasCustomTimes = dto.DoseTimes != null && dto.DoseTimes.Count > 0;
-
+            bool hasCustomTimes = resolvedDoseTimes != null && resolvedDoseTimes.Count > 0;
             if (hasCustomTimes)
             {
-                // Validate format
-                var parsed = new List<TimeOnly>();
-                foreach (var raw in dto.DoseTimes!)
-                {
-                    if (!TimeOnly.TryParse(raw, out var t))
-                        return BadRequest(new { Message = $"Invalid dose time format: '{raw}'. Use HH:mm:ss or HH:mm." });
-                    parsed.Add(t);
-                }
-
-                // Deduplicate and sort
-                resolvedDoseTimes = parsed.Distinct().OrderBy(t => t).ToList();
-
-                if (resolvedDoseTimes.Count == 0)
-                    return BadRequest(new { Message = "doseTimes must contain at least one valid time." });
-
                 if (dto.IntervalHours.HasValue)
                     return BadRequest(new { Message = "intervalHours must not be used together with doseTimes." });
 
@@ -109,6 +104,18 @@ namespace api_test.Controllers
             if (alreadyExists)
                 return BadRequest(new { Message = $"You already have '{dto.MedicationName}' in your medications." });
 
+            var unitError = MedicationQuantityHelper.ValidateUnit(medication.Dosage_Form, dto.QuantityUnit);
+            if (unitError != null)
+                return BadRequest(new { Message = unitError });
+
+            var dosageForm = string.IsNullOrWhiteSpace(medication.Dosage_Form)
+                ? null
+                : medication.Dosage_Form;
+            var quantityUnit = MedicationQuantityHelper.ResolveUnit(dosageForm, dto.QuantityUnit);
+            var initialQuantity = MedicationQuantityHelper.ResolveQuantity(dto.InitialQuantity, dto.InitialPillCount);
+            var currentQuantity = MedicationQuantityHelper.ResolveQuantity(dto.CurrentQuantity, dto.CurrentPillCount);
+            var doseQuantity = MedicationQuantityHelper.ResolveQuantity(dto.DoseQuantity, dto.PillsPerDose);
+
             // ── Expiry adjustment ─────────────────────────────────────────────
             var originalExpiry = dto.ExpiryDate.HasValue
                 ? DateOnly.FromDateTime(dto.ExpiryDate.Value) : (DateOnly?)null;
@@ -125,10 +132,15 @@ namespace api_test.Controllers
                 StartDate = dto.StartDate.HasValue ? DateOnly.FromDateTime(dto.StartDate.Value) : null,
                 EndDate = dto.EndDate.HasValue ? DateOnly.FromDateTime(dto.EndDate.Value) : null,
                 ExpiryDate = adjustedExpiry,
-                CurrentPillCount = dto.CurrentPillCount,
-                InitialPillCount = dto.InitialPillCount,
+                CurrentPillCount = MedicationQuantityHelper.ResolveLegacyCount(dto.CurrentPillCount, currentQuantity),
+                InitialPillCount = MedicationQuantityHelper.ResolveLegacyCount(dto.InitialPillCount, initialQuantity),
                 LowStockThreshold = dto.LowStockThreshold,
-                PillsPerDose = dto.PillsPerDose,
+                PillsPerDose = MedicationQuantityHelper.ResolveLegacyCount(dto.PillsPerDose, doseQuantity),
+                InitialQuantity = initialQuantity,
+                CurrentQuantity = currentQuantity,
+                DoseQuantity = doseQuantity,
+                QuantityUnit = quantityUnit,
+                DosageForm = dosageForm,
                 DosesPerPeriod = dto.DosesPerPeriod,
                 PeriodUnit = dto.PeriodUnit,
                 PeriodValue = dto.PeriodValue,
@@ -159,6 +171,13 @@ namespace api_test.Controllers
                 ExpiryAdjustedNote = expiryWasAdjusted
                     ? (string?)$"Expiry date adjusted from {originalExpiry:dd/MM/yyyy} to {adjustedExpiry:dd/MM/yyyy} because this is a liquid medication (opened shelf life = 3 months)."
                     : null,
+                MedicationName = medication.Trade_name,
+                DosageForm = userMed.DosageForm,
+                QuantityUnit = userMed.QuantityUnit,
+                InitialQuantity = userMed.InitialQuantity,
+                CurrentQuantity = userMed.CurrentQuantity,
+                DoseQuantity = userMed.DoseQuantity,
+                LowStockThreshold = userMed.LowStockThreshold,
                 InteractionWarnings = warnings.Count > 0
     ? warnings.Select(w => w.Reason).ToList()
     : null
@@ -262,6 +281,15 @@ namespace api_test.Controllers
                     InitialPillCount = um.InitialPillCount,
                     LowStockThreshold = um.LowStockThreshold,
                     PillsPerDose = um.PillsPerDose,
+                    DosageForm = string.IsNullOrWhiteSpace(um.DosageForm)
+                        ? um.Medication?.Dosage_Form
+                        : um.DosageForm,
+                    QuantityUnit = string.IsNullOrWhiteSpace(um.QuantityUnit)
+                        ? MedicationQuantityHelper.GetSuggestedUnit(um.DosageForm ?? um.Medication?.Dosage_Form)
+                        : um.QuantityUnit,
+                    InitialQuantity = MedicationQuantityHelper.ResolveQuantity(um.InitialQuantity, um.InitialPillCount),
+                    CurrentQuantity = MedicationQuantityHelper.ResolveQuantity(um.CurrentQuantity, um.CurrentPillCount),
+                    DoseQuantity = MedicationQuantityHelper.ResolveQuantity(um.DoseQuantity, um.PillsPerDose),
                     DosesPerPeriod = um.DosesPerPeriod,
                     PeriodUnit = um.PeriodUnit,
                     PeriodValue = um.PeriodValue,
@@ -299,7 +327,19 @@ namespace api_test.Controllers
                 return BadRequest(new { Message = "lowStockThreshold must not be negative." });
             if (dto.PillsPerDose.HasValue && dto.PillsPerDose <= 0)
                 return BadRequest(new { Message = "pillsPerDose must be greater than 0." });
+            if (MedicationQuantityHelper.HasInvalidQuantity(dto.InitialQuantity))
+                return BadRequest(new { Message = "initialQuantity must not be negative." });
+            if (MedicationQuantityHelper.HasInvalidQuantity(dto.CurrentQuantity))
+                return BadRequest(new { Message = "currentQuantity must not be negative." });
+            if (MedicationQuantityHelper.HasInvalidDoseQuantity(dto.DoseQuantity))
+                return BadRequest(new { Message = "doseQuantity must be greater than 0." });
 
+            var effectiveDosageForm = string.IsNullOrWhiteSpace(userMed.Medication?.Dosage_Form)
+                ? userMed.DosageForm
+                : userMed.Medication.Dosage_Form;
+            var unitError = MedicationQuantityHelper.ValidateUnit(effectiveDosageForm, dto.QuantityUnit);
+            if (unitError != null)
+                return BadRequest(new { Message = unitError });
             // ── Resolve and validate doseTimes ────────────────────────────────
             var resolvedDoseTimes = ResolveDoseTimes(dto.DoseTimes, out string? doseTimeError);
             if (doseTimeError != null)
@@ -344,6 +384,21 @@ namespace api_test.Controllers
 
             // PillsPerDose: update only when explicitly provided; preserve existing value when null
             if (dto.PillsPerDose.HasValue) userMed.PillsPerDose = dto.PillsPerDose;
+            if (dto.InitialQuantity.HasValue) userMed.InitialQuantity = dto.InitialQuantity;
+            if (dto.CurrentQuantity.HasValue) userMed.CurrentQuantity = dto.CurrentQuantity;
+            if (dto.DoseQuantity.HasValue) userMed.DoseQuantity = dto.DoseQuantity;
+            if (dto.QuantityUnit != null) userMed.QuantityUnit = MedicationQuantityHelper.ResolveUnit(effectiveDosageForm, dto.QuantityUnit);
+
+            if (string.IsNullOrWhiteSpace(userMed.DosageForm))
+                userMed.DosageForm = effectiveDosageForm;
+            if (string.IsNullOrWhiteSpace(userMed.QuantityUnit))
+                userMed.QuantityUnit = MedicationQuantityHelper.ResolveUnit(effectiveDosageForm, null);
+            userMed.InitialQuantity = MedicationQuantityHelper.ResolveQuantity(userMed.InitialQuantity, userMed.InitialPillCount);
+            userMed.CurrentQuantity = MedicationQuantityHelper.ResolveQuantity(userMed.CurrentQuantity, userMed.CurrentPillCount);
+            userMed.DoseQuantity = MedicationQuantityHelper.ResolveQuantity(userMed.DoseQuantity, userMed.PillsPerDose);
+            userMed.InitialPillCount = MedicationQuantityHelper.ResolveLegacyCount(userMed.InitialPillCount, userMed.InitialQuantity);
+            userMed.CurrentPillCount = MedicationQuantityHelper.ResolveLegacyCount(userMed.CurrentPillCount, userMed.CurrentQuantity);
+            userMed.PillsPerDose = MedicationQuantityHelper.ResolveLegacyCount(userMed.PillsPerDose, userMed.DoseQuantity);
 
             // ── Apply schedule fields ─────────────────────────────────────────
             bool scheduleChanged = false;
@@ -471,6 +526,13 @@ namespace api_test.Controllers
                 ExpiryAdjustedNote = expiryWasAdjusted
                     ? (string?)$"Expiry date adjusted from {originalExpiry:dd/MM/yyyy} to {adjustedExpiry:dd/MM/yyyy} because this is a liquid medication (opened shelf life = 3 months)."
                     : null,
+                MedicationName = userMed.Medication?.Trade_name,
+                DosageForm = userMed.DosageForm,
+                QuantityUnit = userMed.QuantityUnit,
+                InitialQuantity = userMed.InitialQuantity,
+                CurrentQuantity = userMed.CurrentQuantity,
+                DoseQuantity = userMed.DoseQuantity,
+                LowStockThreshold = userMed.LowStockThreshold,
                 ScheduleRegenerated = scheduleChanged
             });
         }
@@ -515,7 +577,9 @@ namespace api_test.Controllers
             var userMed = new UserMedication
             {
                 UserId = userId,
-                MedId = medication.ID
+                MedId = medication.ID,
+                DosageForm = medication.Dosage_Form,
+                QuantityUnit = MedicationQuantityHelper.GetSuggestedUnit(medication.Dosage_Form)
             };
 
             _context.UserMedications.Add(userMed);
@@ -528,7 +592,8 @@ namespace api_test.Controllers
                 Message = "Medication selected successfully.",
                 UserMedicationId = userMed.Id,
                 MedicationName = medication.Trade_name,
-                DosageForm = medication.Dosage_Form,
+                DosageForm = userMed.DosageForm,
+                QuantityUnit = userMed.QuantityUnit,
                 InteractionWarnings = warnings.Count > 0
     ? warnings.Select(w => w.Reason).ToList()
     : null
@@ -557,6 +622,19 @@ namespace api_test.Controllers
                 return BadRequest(new { Message = "lowStockThreshold must not be negative." });
             if (dto.PillsPerDose.HasValue && dto.PillsPerDose <= 0)
                 return BadRequest(new { Message = "pillsPerDose must be greater than 0." });
+            if (MedicationQuantityHelper.HasInvalidQuantity(dto.InitialQuantity))
+                return BadRequest(new { Message = "initialQuantity must not be negative." });
+            if (MedicationQuantityHelper.HasInvalidQuantity(dto.CurrentQuantity))
+                return BadRequest(new { Message = "currentQuantity must not be negative." });
+            if (MedicationQuantityHelper.HasInvalidDoseQuantity(dto.DoseQuantity))
+                return BadRequest(new { Message = "doseQuantity must be greater than 0." });
+
+            var effectiveDosageForm = string.IsNullOrWhiteSpace(userMed.Medication?.Dosage_Form)
+                ? userMed.DosageForm
+                : userMed.Medication.Dosage_Form;
+            var unitError = MedicationQuantityHelper.ValidateUnit(effectiveDosageForm, dto.QuantityUnit);
+            if (unitError != null)
+                return BadRequest(new { Message = unitError });
 
             // ── Resolve and validate doseTimes ────────────────────────────────
             var resolvedDoseTimes = ResolveDoseTimes(dto.DoseTimes, out string? doseTimeError);
@@ -602,7 +680,14 @@ namespace api_test.Controllers
 
             // PillsPerDose: save provided value (null means clear/unset for the details endpoint
             // which is a full-replace style endpoint like the original fields above)
-            userMed.PillsPerDose = dto.PillsPerDose;
+            userMed.InitialQuantity = MedicationQuantityHelper.ResolveQuantity(dto.InitialQuantity, dto.InitialPillCount);
+            userMed.CurrentQuantity = MedicationQuantityHelper.ResolveQuantity(dto.CurrentQuantity, dto.CurrentPillCount);
+            userMed.DoseQuantity = MedicationQuantityHelper.ResolveQuantity(dto.DoseQuantity, dto.PillsPerDose);
+            userMed.QuantityUnit = MedicationQuantityHelper.ResolveUnit(effectiveDosageForm, dto.QuantityUnit);
+            userMed.DosageForm = effectiveDosageForm;
+            userMed.PillsPerDose = MedicationQuantityHelper.ResolveLegacyCount(dto.PillsPerDose, userMed.DoseQuantity);
+            userMed.InitialPillCount = MedicationQuantityHelper.ResolveLegacyCount(dto.InitialPillCount, userMed.InitialQuantity);
+            userMed.CurrentPillCount = MedicationQuantityHelper.ResolveLegacyCount(dto.CurrentPillCount, userMed.CurrentQuantity);
 
             // ── Detect schedule-related changes ───────────────────────────────
             bool scheduleChanged = false;
@@ -714,7 +799,14 @@ namespace api_test.Controllers
                 ExpiryAdjusted = expiryWasAdjusted,
                 ExpiryAdjustedNote = expiryWasAdjusted
                     ? (string?)$"Expiry date adjusted from {originalExpiry:dd/MM/yyyy} to {adjustedExpiry:dd/MM/yyyy} because this is a liquid medication (opened shelf life = 3 months)."
-                    : null
+                    : null,
+                MedicationName = userMed.Medication?.Trade_name,
+                DosageForm = userMed.DosageForm,
+                QuantityUnit = userMed.QuantityUnit,
+                InitialQuantity = userMed.InitialQuantity,
+                CurrentQuantity = userMed.CurrentQuantity,
+                DoseQuantity = userMed.DoseQuantity,
+                LowStockThreshold = userMed.LowStockThreshold
             });
         }
 

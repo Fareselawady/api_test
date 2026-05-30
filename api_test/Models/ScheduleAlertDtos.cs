@@ -12,6 +12,10 @@
         public string Status { get; set; } = string.Empty;
         public bool ReminderSent { get; set; }
         public int SnoozeCount { get; set; }
+        public decimal? DoseQuantity { get; set; }
+        public decimal? CurrentQuantity { get; set; }
+        public string? QuantityUnit { get; set; }
+        public string? DosageForm { get; set; }
 
         // ── Interactions ──────────────────────────────────────────────────────
         /// <summary>

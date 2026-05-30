@@ -27,6 +27,12 @@
         /// </summary>
         public int? PillsPerDose { get; set; }
 
+        public decimal? InitialQuantity { get; set; }
+        public decimal? CurrentQuantity { get; set; }
+        public decimal? DoseQuantity { get; set; }
+        public string? QuantityUnit { get; set; }
+        public string? DosageForm { get; set; }
+
         public int? DosesPerPeriod { get; set; }
         public string? PeriodUnit { get; set; }
         public int? PeriodValue { get; set; }

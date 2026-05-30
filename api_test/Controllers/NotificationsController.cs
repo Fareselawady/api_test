@@ -102,6 +102,14 @@ namespace api_test.Controllers
                     PillsPerDose = um.PillsPerDose,
                     CurrentPillCount = um.CurrentPillCount,
                     LowStockThreshold = um.LowStockThreshold,
+                    DosageForm = string.IsNullOrWhiteSpace(um.DosageForm)
+                        ? um.Medication?.Dosage_Form
+                        : um.DosageForm,
+                    QuantityUnit = string.IsNullOrWhiteSpace(um.QuantityUnit)
+                        ? MedicationQuantityHelper.GetSuggestedUnit(um.DosageForm ?? um.Medication?.Dosage_Form)
+                        : um.QuantityUnit,
+                    DoseQuantity = MedicationQuantityHelper.ResolveQuantity(um.DoseQuantity, um.PillsPerDose),
+                    CurrentQuantity = MedicationQuantityHelper.ResolveQuantity(um.CurrentQuantity, um.CurrentPillCount),
                     HasInteractions = interactionMap.GetValueOrDefault(um.MedId, false)
                 };
             }).ToList();

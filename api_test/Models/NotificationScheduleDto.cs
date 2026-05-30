@@ -24,6 +24,10 @@
         public int? PillsPerDose { get; set; }
         public int? CurrentPillCount { get; set; }
         public int? LowStockThreshold { get; set; }
+        public decimal? DoseQuantity { get; set; }
+        public decimal? CurrentQuantity { get; set; }
+        public string? QuantityUnit { get; set; }
+        public string? DosageForm { get; set; }
 
         /// <summary>True if this medication has at least one known drug interaction.</summary>
         public bool HasInteractions { get; set; }

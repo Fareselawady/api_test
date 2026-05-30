@@ -35,6 +35,7 @@ namespace api_test.Controllers
                     m.Trade_name,
                     m.Description,
                     m.Dosage_Form,
+                    QuantityUnit = MedicationQuantityHelper.GetSuggestedUnit(m.Dosage_Form),
                     m.image_url,
 
                     Ingredients = m.Ingredients!
@@ -64,6 +65,7 @@ namespace api_test.Controllers
                     Dosage_Form = string.IsNullOrWhiteSpace(translatedDosageForm)
                         ? m.Dosage_Form
                         : translatedDosageForm,
+                    m.QuantityUnit,
                     m.image_url,
                     m.Ingredients
                 };

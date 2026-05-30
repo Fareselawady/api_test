@@ -315,19 +315,40 @@ namespace api_test.Services
                 .ToListAsync();
             relatedAlerts.ForEach(a => a.IsRead = true);
 
-            int pillsDeducted = 0;
-            if (userMed.CurrentPillCount.HasValue)
-            {
-                int pillsToDeduct = userMed.PillsPerDose ?? 1;
-                if (pillsToDeduct <= 0) pillsToDeduct = 1;
+            var dosageForm = string.IsNullOrWhiteSpace(userMed.DosageForm)
+                ? userMed.Medication?.Dosage_Form
+                : userMed.DosageForm;
+            userMed.DosageForm = dosageForm;
 
-                pillsDeducted = Math.Min(pillsToDeduct, userMed.CurrentPillCount.Value);
-                userMed.CurrentPillCount = Math.Max(0, userMed.CurrentPillCount.Value - pillsToDeduct);
+            if (string.IsNullOrWhiteSpace(userMed.QuantityUnit))
+                userMed.QuantityUnit = MedicationQuantityHelper.GetSuggestedUnit(dosageForm);
+
+            userMed.CurrentQuantity = MedicationQuantityHelper.ResolveQuantity(
+                userMed.CurrentQuantity,
+                userMed.CurrentPillCount);
+            userMed.InitialQuantity = MedicationQuantityHelper.ResolveQuantity(
+                userMed.InitialQuantity,
+                userMed.InitialPillCount);
+            userMed.DoseQuantity = MedicationQuantityHelper.ResolveQuantity(
+                userMed.DoseQuantity,
+                userMed.PillsPerDose);
+
+            int pillsDeducted = 0;
+            decimal quantityDeducted = 0;
+            if (userMed.CurrentQuantity.HasValue)
+            {
+                var quantityToDeduct = userMed.DoseQuantity ?? 1;
+                if (quantityToDeduct <= 0) quantityToDeduct = 1;
+
+                quantityDeducted = Math.Min(quantityToDeduct, userMed.CurrentQuantity.Value);
+                userMed.CurrentQuantity = Math.Max(0, userMed.CurrentQuantity.Value - quantityToDeduct);
+                userMed.CurrentPillCount = MedicationQuantityHelper.ResolveLegacyCount(null, userMed.CurrentQuantity);
+                pillsDeducted = MedicationQuantityHelper.ResolveLegacyCount(null, quantityDeducted) ?? 0;
             }
 
             bool lowStockAlertCreated = false;
-            if (userMed.CurrentPillCount.HasValue && userMed.LowStockThreshold.HasValue
-                && userMed.CurrentPillCount <= userMed.LowStockThreshold)
+            if (userMed.CurrentQuantity.HasValue && userMed.LowStockThreshold.HasValue
+                && userMed.CurrentQuantity <= userMed.LowStockThreshold)
             {
                 bool alreadySentToday = await _context.Alerts.AnyAsync(a =>
                     a.UserMedicationId == userMed.Id &&
@@ -343,8 +364,8 @@ namespace api_test.Services
                         Type = "LowStock",
                         Title = "Low Medication Stock",
                         Message = $"\"{userMed.Medication.Trade_name}\" is running low. " +
-                                           $"Remaining: {userMed.CurrentPillCount} pill(s) " +
-                                           $"(threshold: {userMed.LowStockThreshold}).",
+                                           $"Remaining: {FormatQuantity(userMed.CurrentQuantity)} {userMed.QuantityUnit} " +
+                                           $"(threshold: {userMed.LowStockThreshold} {userMed.QuantityUnit}).",
                         IsRead = false,
                         ScheduledAt = now,
                         CreatedAt = now
@@ -359,6 +380,9 @@ namespace api_test.Services
                 scheduleId: scheduleId,
                 pillsDeducted: pillsDeducted,
                 remainingPills: userMed.CurrentPillCount,
+                quantityDeducted: quantityDeducted,
+                remainingQuantity: userMed.CurrentQuantity,
+                quantityUnit: userMed.QuantityUnit,
                 lowStockAlert: lowStockAlertCreated
             );
         }
@@ -569,7 +593,15 @@ namespace api_test.Services
                     : string.Empty,
                 Status = s.Status ?? string.Empty,
                 ReminderSent = s.ReminderSent,
-                SnoozeCount = s.SnoozeCount
+                SnoozeCount = s.SnoozeCount,
+                DosageForm = string.IsNullOrWhiteSpace(s.UserMedication?.DosageForm)
+                    ? s.UserMedication?.Medication?.Dosage_Form
+                    : s.UserMedication?.DosageForm,
+                QuantityUnit = string.IsNullOrWhiteSpace(s.UserMedication?.QuantityUnit)
+                    ? MedicationQuantityHelper.GetSuggestedUnit(s.UserMedication?.DosageForm ?? s.UserMedication?.Medication?.Dosage_Form)
+                    : s.UserMedication?.QuantityUnit,
+                DoseQuantity = MedicationQuantityHelper.ResolveQuantity(s.UserMedication?.DoseQuantity, s.UserMedication?.PillsPerDose),
+                CurrentQuantity = MedicationQuantityHelper.ResolveQuantity(s.UserMedication?.CurrentQuantity, s.UserMedication?.CurrentPillCount)
             };
         }
 
@@ -584,6 +616,11 @@ namespace api_test.Services
                 SnoozeCount = 0,
                 CreatedAt = DateTime.UtcNow
             };
+
+        private static string FormatQuantity(decimal? quantity)
+            => quantity.HasValue
+                ? quantity.Value.ToString("0.##")
+                : "0";
 
         private static double GetPeriodHours(string periodUnit, int periodValue)
             => periodUnit.ToLower() switch

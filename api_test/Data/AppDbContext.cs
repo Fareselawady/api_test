@@ -52,6 +52,9 @@ namespace api_test.Data
                     v => v == null ? (double?)null : (double)v.Value,
                     v => v == null ? (int?)null : (int)v.Value
                 );
+                entity.Property(e => e.InitialQuantity).HasPrecision(18, 2);
+                entity.Property(e => e.CurrentQuantity).HasPrecision(18, 2);
+                entity.Property(e => e.DoseQuantity).HasPrecision(18, 2);
             });
 
             modelBuilder.Entity<MedicationSchedule>(entity =>

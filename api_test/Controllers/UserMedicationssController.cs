@@ -116,11 +116,18 @@ namespace api_test.Controllers
             var currentQuantity = MedicationQuantityHelper.ResolveQuantity(dto.CurrentQuantity, dto.CurrentPillCount);
             var doseQuantity = MedicationQuantityHelper.ResolveQuantity(dto.DoseQuantity, dto.PillsPerDose);
 
-            // ── Expiry adjustment ─────────────────────────────────────────────
-            var originalExpiry = dto.ExpiryDate.HasValue
-                ? DateOnly.FromDateTime(dto.ExpiryDate.Value) : (DateOnly?)null;
+            var now = DateTime.UtcNow;
+            var afterOpeningError = MedicationExpiryHelper.ValidateAfterOpeningInput(
+                dto.IsOpened,
+                dto.OpenedDate,
+                dto.AfterOpeningDurationValue,
+                dto.AfterOpeningDurationUnit,
+                now);
+            if (afterOpeningError != null)
+                return BadRequest(new { Message = afterOpeningError });
 
-            var adjustedExpiry = AdjustExpiryForLiquid(originalExpiry, medication.Dosage_Form);
+            var packageExpiry = dto.ExpiryDate.HasValue
+                ? DateOnly.FromDateTime(dto.ExpiryDate.Value) : (DateOnly?)null;
 
             // ── Build entity ──────────────────────────────────────────────────
             var userMed = new UserMedication
@@ -131,7 +138,11 @@ namespace api_test.Controllers
                 Notes = dto.Notes,
                 StartDate = dto.StartDate.HasValue ? DateOnly.FromDateTime(dto.StartDate.Value) : null,
                 EndDate = dto.EndDate.HasValue ? DateOnly.FromDateTime(dto.EndDate.Value) : null,
-                ExpiryDate = adjustedExpiry,
+                ExpiryDate = packageExpiry,
+                IsOpened = dto.IsOpened,
+                OpenedDate = dto.OpenedDate?.Date,
+                AfterOpeningDurationValue = dto.AfterOpeningDurationValue,
+                AfterOpeningDurationUnit = dto.AfterOpeningDurationUnit,
                 CurrentPillCount = MedicationQuantityHelper.ResolveLegacyCount(dto.CurrentPillCount, currentQuantity),
                 InitialPillCount = MedicationQuantityHelper.ResolveLegacyCount(dto.InitialPillCount, initialQuantity),
                 LowStockThreshold = dto.LowStockThreshold,
@@ -149,6 +160,8 @@ namespace api_test.Controllers
                 NotificationActive = dto.NotificationActive
             };
 
+            MedicationExpiryHelper.Apply(userMed, medication, now);
+
             _context.UserMedications.Add(userMed);
             await _context.SaveChangesAsync();
 
@@ -160,17 +173,19 @@ namespace api_test.Controllers
             var warnings = await _interactionService
     .CheckInteractionsForNewMedWithLangAsync(userId, medication.Trade_name!, lang);
 
-
-            bool expiryWasAdjusted = adjustedExpiry != originalExpiry;
-
             return Ok(new
             {
                 Message = $"'{dto.MedicationName}' added to your medications successfully.",
-                ExpiryDate = adjustedExpiry,
-                ExpiryAdjusted = expiryWasAdjusted,
-                ExpiryAdjustedNote = expiryWasAdjusted
-                    ? (string?)$"Expiry date adjusted from {originalExpiry:dd/MM/yyyy} to {adjustedExpiry:dd/MM/yyyy} because this is a liquid medication (opened shelf life = 3 months)."
-                    : null,
+                ExpiryDate = userMed.ExpiryDate,
+                userMed.IsOpened,
+                userMed.OpenedDate,
+                userMed.AfterOpeningDurationValue,
+                userMed.AfterOpeningDurationUnit,
+                userMed.AfterOpeningExpiryDate,
+                userMed.EffectiveExpiryDate,
+                userMed.ExpiryReason,
+                userMed.AfterOpeningSource,
+                AfterOpeningWarning = MedicationExpiryHelper.GetWarning(userMed),
                 MedicationName = medication.Trade_name,
                 DosageForm = userMed.DosageForm,
                 QuantityUnit = userMed.QuantityUnit,
@@ -277,6 +292,15 @@ namespace api_test.Controllers
                     StartDate = um.StartDate?.ToDateTime(TimeOnly.MinValue),
                     EndDate = um.EndDate?.ToDateTime(TimeOnly.MinValue),
                     ExpiryDate = um.ExpiryDate?.ToDateTime(TimeOnly.MinValue),
+                    IsOpened = um.IsOpened,
+                    OpenedDate = um.OpenedDate,
+                    AfterOpeningDurationValue = um.AfterOpeningDurationValue,
+                    AfterOpeningDurationUnit = um.AfterOpeningDurationUnit,
+                    AfterOpeningExpiryDate = um.AfterOpeningExpiryDate,
+                    EffectiveExpiryDate = um.EffectiveExpiryDate,
+                    ExpiryReason = um.ExpiryReason,
+                    AfterOpeningSource = um.AfterOpeningSource,
+                    AfterOpeningWarning = MedicationExpiryHelper.GetWarning(um),
                     CurrentPillCount = um.CurrentPillCount,
                     InitialPillCount = um.InitialPillCount,
                     LowStockThreshold = um.LowStockThreshold,
@@ -318,6 +342,8 @@ namespace api_test.Controllers
             if (userMed == null)
                 return NotFound(new { Message = "UserMedication not found." });
 
+            var now = DateTime.UtcNow;
+
             // ── Validate basic fields ─────────────────────────────────────────
             if (dto.CurrentPillCount.HasValue && dto.CurrentPillCount < 0)
                 return BadRequest(new { Message = "currentPillCount must not be negative." });
@@ -333,6 +359,16 @@ namespace api_test.Controllers
                 return BadRequest(new { Message = "currentQuantity must not be negative." });
             if (MedicationQuantityHelper.HasInvalidDoseQuantity(dto.DoseQuantity))
                 return BadRequest(new { Message = "doseQuantity must be greater than 0." });
+
+            var nextIsOpened = dto.IsOpened ?? userMed.IsOpened;
+            var afterOpeningError = MedicationExpiryHelper.ValidateAfterOpeningInput(
+                nextIsOpened,
+                dto.OpenedDate,
+                dto.AfterOpeningDurationValue,
+                dto.AfterOpeningDurationUnit,
+                now);
+            if (afterOpeningError != null)
+                return BadRequest(new { Message = afterOpeningError });
 
             var effectiveDosageForm = string.IsNullOrWhiteSpace(userMed.Medication?.Dosage_Form)
                 ? userMed.DosageForm
@@ -381,6 +417,18 @@ namespace api_test.Controllers
             if (dto.InitialPillCount.HasValue) userMed.InitialPillCount = dto.InitialPillCount;
             if (dto.LowStockThreshold.HasValue) userMed.LowStockThreshold = dto.LowStockThreshold;
             if (dto.NotificationActive.HasValue) userMed.NotificationActive = dto.NotificationActive.Value;
+            if (dto.IsOpened.HasValue) userMed.IsOpened = dto.IsOpened.Value;
+            if (dto.OpenedDate.HasValue) userMed.OpenedDate = dto.OpenedDate.Value.Date;
+            if (dto.AfterOpeningDurationValue.HasValue)
+            {
+                userMed.AfterOpeningDurationValue = dto.AfterOpeningDurationValue;
+                userMed.AfterOpeningSource = null;
+            }
+            if (dto.AfterOpeningDurationUnit != null)
+            {
+                userMed.AfterOpeningDurationUnit = dto.AfterOpeningDurationUnit;
+                userMed.AfterOpeningSource = null;
+            }
 
             // PillsPerDose: update only when explicitly provided; preserve existing value when null
             if (dto.PillsPerDose.HasValue) userMed.PillsPerDose = dto.PillsPerDose;
@@ -495,15 +543,12 @@ namespace api_test.Controllers
                 }
             }
 
-            // ── Expiry ────────────────────────────────────────────────────────
-            DateOnly? adjustedExpiry = null;
-            DateOnly? originalExpiry = null;
             if (dto.ExpiryDate.HasValue)
             {
-                originalExpiry = DateOnly.FromDateTime(dto.ExpiryDate.Value);
-                adjustedExpiry = AdjustExpiryForLiquid(originalExpiry, userMed.Medication?.Dosage_Form);
-                userMed.ExpiryDate = adjustedExpiry;
+                userMed.ExpiryDate = DateOnly.FromDateTime(dto.ExpiryDate.Value);
             }
+
+            MedicationExpiryHelper.Apply(userMed, userMed.Medication, now);
 
             await _context.SaveChangesAsync();
 
@@ -516,16 +561,19 @@ namespace api_test.Controllers
                     await _scheduleService.RegenerateScheduleAsync(userMed);
             }
 
-            bool expiryWasAdjusted = adjustedExpiry != null && adjustedExpiry != originalExpiry;
-
             return Ok(new
             {
                 Message = "UserMedication updated successfully.",
                 ExpiryDate = userMed.ExpiryDate,
-                ExpiryAdjusted = expiryWasAdjusted,
-                ExpiryAdjustedNote = expiryWasAdjusted
-                    ? (string?)$"Expiry date adjusted from {originalExpiry:dd/MM/yyyy} to {adjustedExpiry:dd/MM/yyyy} because this is a liquid medication (opened shelf life = 3 months)."
-                    : null,
+                userMed.IsOpened,
+                userMed.OpenedDate,
+                userMed.AfterOpeningDurationValue,
+                userMed.AfterOpeningDurationUnit,
+                userMed.AfterOpeningExpiryDate,
+                userMed.EffectiveExpiryDate,
+                userMed.ExpiryReason,
+                userMed.AfterOpeningSource,
+                AfterOpeningWarning = MedicationExpiryHelper.GetWarning(userMed),
                 MedicationName = userMed.Medication?.Trade_name,
                 DosageForm = userMed.DosageForm,
                 QuantityUnit = userMed.QuantityUnit,
@@ -582,6 +630,8 @@ namespace api_test.Controllers
                 QuantityUnit = MedicationQuantityHelper.GetSuggestedUnit(medication.Dosage_Form)
             };
 
+            MedicationExpiryHelper.Apply(userMed, medication, DateTime.UtcNow);
+
             _context.UserMedications.Add(userMed);
             await _context.SaveChangesAsync();
             var warnings = await _interactionService
@@ -613,6 +663,8 @@ namespace api_test.Controllers
             if (userMed == null)
                 return NotFound(new { Message = "UserMedication not found." });
 
+            var now = DateTime.UtcNow;
+
             // ── Validate basic fields ─────────────────────────────────────────
             if (dto.CurrentPillCount.HasValue && dto.CurrentPillCount < 0)
                 return BadRequest(new { Message = "currentPillCount must not be negative." });
@@ -628,6 +680,15 @@ namespace api_test.Controllers
                 return BadRequest(new { Message = "currentQuantity must not be negative." });
             if (MedicationQuantityHelper.HasInvalidDoseQuantity(dto.DoseQuantity))
                 return BadRequest(new { Message = "doseQuantity must be greater than 0." });
+
+            var afterOpeningError = MedicationExpiryHelper.ValidateAfterOpeningInput(
+                dto.IsOpened,
+                dto.OpenedDate,
+                dto.AfterOpeningDurationValue,
+                dto.AfterOpeningDurationUnit,
+                now);
+            if (afterOpeningError != null)
+                return BadRequest(new { Message = afterOpeningError });
 
             var effectiveDosageForm = string.IsNullOrWhiteSpace(userMed.Medication?.Dosage_Form)
                 ? userMed.DosageForm
@@ -663,16 +724,18 @@ namespace api_test.Controllers
             if (effectiveScheduleType == "CustomTimes" && dto.IntervalHours.HasValue)
                 return BadRequest(new { Message = "intervalHours must not be used together with doseTimes." });
 
-            // ── Expiry ────────────────────────────────────────────────────────
-            var originalExpiry = dto.ExpiryDate.HasValue
+            var packageExpiry = dto.ExpiryDate.HasValue
                 ? DateOnly.FromDateTime(dto.ExpiryDate.Value) : (DateOnly?)null;
-
-            var adjustedExpiry = AdjustExpiryForLiquid(originalExpiry, userMed.Medication?.Dosage_Form);
 
             // ── Apply all fields ──────────────────────────────────────────────
             userMed.Dosage = dto.Dosage;
             userMed.Notes = dto.Notes;
-            userMed.ExpiryDate = adjustedExpiry;
+            userMed.ExpiryDate = packageExpiry;
+            userMed.IsOpened = dto.IsOpened;
+            userMed.OpenedDate = dto.OpenedDate?.Date;
+            userMed.AfterOpeningDurationValue = dto.AfterOpeningDurationValue;
+            userMed.AfterOpeningDurationUnit = dto.AfterOpeningDurationUnit;
+            userMed.AfterOpeningSource = null;
             userMed.CurrentPillCount = dto.CurrentPillCount;
             userMed.InitialPillCount = dto.InitialPillCount;
             userMed.LowStockThreshold = dto.LowStockThreshold;
@@ -779,6 +842,8 @@ namespace api_test.Controllers
                 userMed.IntervalHours = dto.IntervalHours;
             }
 
+            MedicationExpiryHelper.Apply(userMed, userMed.Medication, now);
+
             await _context.SaveChangesAsync();
 
             // ── Generate/regenerate schedules only when schedule fields changed ─
@@ -790,16 +855,19 @@ namespace api_test.Controllers
                     await _scheduleService.RegenerateScheduleAsync(userMed);
             }
 
-            bool expiryWasAdjusted = adjustedExpiry != originalExpiry;
-
             return Ok(new
             {
                 Message = "Medication details added successfully.",
-                ExpiryDate = adjustedExpiry,
-                ExpiryAdjusted = expiryWasAdjusted,
-                ExpiryAdjustedNote = expiryWasAdjusted
-                    ? (string?)$"Expiry date adjusted from {originalExpiry:dd/MM/yyyy} to {adjustedExpiry:dd/MM/yyyy} because this is a liquid medication (opened shelf life = 3 months)."
-                    : null,
+                ExpiryDate = userMed.ExpiryDate,
+                userMed.IsOpened,
+                userMed.OpenedDate,
+                userMed.AfterOpeningDurationValue,
+                userMed.AfterOpeningDurationUnit,
+                userMed.AfterOpeningExpiryDate,
+                userMed.EffectiveExpiryDate,
+                userMed.ExpiryReason,
+                userMed.AfterOpeningSource,
+                AfterOpeningWarning = MedicationExpiryHelper.GetWarning(userMed),
                 MedicationName = userMed.Medication?.Trade_name,
                 DosageForm = userMed.DosageForm,
                 QuantityUnit = userMed.QuantityUnit,
@@ -816,26 +884,6 @@ namespace api_test.Controllers
             var claim = User.FindFirst(ClaimTypes.NameIdentifier);
             if (claim == null) throw new UnauthorizedAccessException();
             return int.Parse(claim.Value);
-        }
-
-        private static DateOnly? AdjustExpiryForLiquid(DateOnly? originalExpiry, string? dosageForm)
-        {
-            if (string.IsNullOrWhiteSpace(dosageForm) || originalExpiry == null)
-                return originalExpiry;
-
-            var liquidForms = new[]
-            {
-                "Syrup", "Suspension", "Oral_Solution", "Oral_Drop",
-                "Oral Drops", "Ampoule", "Vial_powder", "Ophthalmic Solution",
-                "Emulgel", "Gel"
-            };
-
-            bool isLiquid = liquidForms.Any(f =>
-                dosageForm.Equals(f, StringComparison.OrdinalIgnoreCase));
-
-            if (!isLiquid) return originalExpiry;
-
-            return originalExpiry.Value.AddMonths(-3);
         }
 
         /// <summary>

@@ -47,6 +47,8 @@ namespace api_test.Data
                 entity.Property(e => e.StartDate).HasConversion(dateOnlyConverter);
                 entity.Property(e => e.EndDate).HasConversion(dateOnlyConverter);
                 entity.Property(e => e.ExpiryDate).HasConversion(dateOnlyConverter);
+                entity.Property(e => e.IsOpened).HasDefaultValue(false);
+                entity.Property(e => e.AfterOpeningDurationUnit).HasDefaultValue("days");
                 entity.Property(e => e.FirstDoseTime).HasConversion(timeOnlyConverter);
                 entity.Property(e => e.IntervalHours).HasConversion(
                     v => v == null ? (double?)null : (double)v.Value,
@@ -55,6 +57,12 @@ namespace api_test.Data
                 entity.Property(e => e.InitialQuantity).HasPrecision(18, 2);
                 entity.Property(e => e.CurrentQuantity).HasPrecision(18, 2);
                 entity.Property(e => e.DoseQuantity).HasPrecision(18, 2);
+            });
+
+            modelBuilder.Entity<Medication>(entity =>
+            {
+                entity.Property(e => e.DefaultAfterOpeningUnit).HasDefaultValue("days");
+                entity.Property(e => e.RequiresOpeningTracking).HasDefaultValue(false);
             });
 
             modelBuilder.Entity<MedicationSchedule>(entity =>

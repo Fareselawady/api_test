@@ -219,7 +219,10 @@ namespace api_test.Services
                         "MissedDoseMessage", lang, fallback, medName);
 
                 case "ExpiryWarning":
-                    var expiryDate = alert.UserMedication?.ExpiryDate?.ToString("dd/MM/yyyy") ?? string.Empty;
+                    var effectiveExpiry = alert.UserMedication == null
+                        ? null
+                        : MedicationExpiryHelper.GetEffectiveExpiryDate(alert.UserMedication);
+                    var expiryDate = effectiveExpiry?.ToString("dd/MM/yyyy") ?? string.Empty;
                     var daysLeft = MatchFirstNumber(fallback);
                     var expiryKey = alert.Title?.Contains("today", StringComparison.OrdinalIgnoreCase) == true
                         ? "ExpiryWarningTodayMessage"

@@ -36,6 +36,10 @@ namespace api_test.Controllers
                     m.Description,
                     m.Dosage_Form,
                     QuantityUnit = MedicationQuantityHelper.GetSuggestedUnit(m.Dosage_Form),
+                    m.DefaultAfterOpeningValue,
+                    m.DefaultAfterOpeningUnit,
+                    m.RequiresOpeningTracking,
+                    m.AfterOpeningNote,
                     m.image_url,
 
                     Ingredients = m.Ingredients!
@@ -66,6 +70,12 @@ namespace api_test.Controllers
                         ? m.Dosage_Form
                         : translatedDosageForm,
                     m.QuantityUnit,
+                    m.DefaultAfterOpeningValue,
+                    DefaultAfterOpeningUnit = MedicationExpiryHelper.NormalizeDefaultUnit(m.DefaultAfterOpeningUnit),
+                    RequiresOpeningTracking = m.RequiresOpeningTracking
+                        || m.DefaultAfterOpeningValue.HasValue
+                        || MedicationExpiryHelper.HasDosageFormDefault(m.Dosage_Form),
+                    m.AfterOpeningNote,
                     m.image_url,
                     m.Ingredients
                 };
@@ -150,6 +160,12 @@ namespace api_test.Controllers
         [HttpPost("add")]
         public async Task<IActionResult> AddMedication(CreateMedicationDto dto)
         {
+            var defaultError = MedicationExpiryHelper.ValidateMedicationDefault(
+                dto.DefaultAfterOpeningValue,
+                dto.DefaultAfterOpeningUnit);
+            if (defaultError != null)
+                return BadRequest(new { Message = defaultError });
+
             var exists = await _context.Medications
                 .AnyAsync(m => m.Trade_name == dto.TradeName);
 
@@ -161,7 +177,11 @@ namespace api_test.Controllers
                 Trade_name = dto.TradeName,
                 Description = dto.Description,
                 Dosage_Form = dto.DosageForm,
-                image_url = dto.ImageUrl
+                image_url = dto.ImageUrl,
+                DefaultAfterOpeningValue = dto.DefaultAfterOpeningValue,
+                DefaultAfterOpeningUnit = MedicationExpiryHelper.NormalizeDefaultUnit(dto.DefaultAfterOpeningUnit),
+                RequiresOpeningTracking = dto.RequiresOpeningTracking,
+                AfterOpeningNote = dto.AfterOpeningNote
             };
 
             _context.Medications.Add(medication);
@@ -171,7 +191,11 @@ namespace api_test.Controllers
             {
                 Message = "Medication added successfully.",
                 MedicationId = medication.ID,
-                MedicationName = medication.Trade_name
+                MedicationName = medication.Trade_name,
+                medication.DefaultAfterOpeningValue,
+                medication.DefaultAfterOpeningUnit,
+                medication.RequiresOpeningTracking,
+                medication.AfterOpeningNote
             });
         }
 
@@ -184,6 +208,12 @@ namespace api_test.Controllers
 
             if (medication == null)
                 return NotFound(new { Message = "Medication not found." });
+
+            var defaultError = MedicationExpiryHelper.ValidateMedicationDefault(
+                dto.DefaultAfterOpeningValue,
+                dto.DefaultAfterOpeningUnit);
+            if (defaultError != null)
+                return BadRequest(new { Message = defaultError });
 
             if (string.IsNullOrWhiteSpace(dto.TradeName))
                 return BadRequest(new { Message = "Trade name is required." });
@@ -199,6 +229,10 @@ namespace api_test.Controllers
             medication.Description = dto.Description;
             medication.Dosage_Form = dto.DosageForm;
             medication.image_url = dto.ImageUrl;
+            medication.DefaultAfterOpeningValue = dto.DefaultAfterOpeningValue;
+            medication.DefaultAfterOpeningUnit = MedicationExpiryHelper.NormalizeDefaultUnit(dto.DefaultAfterOpeningUnit);
+            medication.RequiresOpeningTracking = dto.RequiresOpeningTracking;
+            medication.AfterOpeningNote = dto.AfterOpeningNote;
 
             await _context.SaveChangesAsync();
 
@@ -211,7 +245,11 @@ namespace api_test.Controllers
                     medication.Trade_name,
                     medication.Description,
                     medication.Dosage_Form,
-                    medication.image_url
+                    medication.image_url,
+                    medication.DefaultAfterOpeningValue,
+                    medication.DefaultAfterOpeningUnit,
+                    medication.RequiresOpeningTracking,
+                    medication.AfterOpeningNote
                 }
             });
         }

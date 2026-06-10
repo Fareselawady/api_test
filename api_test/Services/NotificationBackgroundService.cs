@@ -65,12 +65,17 @@ namespace api_test.Services
         {
             var meds = await db.UserMedications
                 .Include(um => um.Medication)
-                .Where(um => um.NotificationActive && um.ExpiryDate != null)
+                .Where(um => um.NotificationActive
+                    && (um.EffectiveExpiryDate != null || um.ExpiryDate != null))
                 .ToListAsync();
 
             foreach (var um in meds)
             {
-                int daysLeft = um.ExpiryDate!.Value.DayNumber - today.DayNumber;
+                var effectiveExpiry = MedicationExpiryHelper.GetEffectiveExpiryDate(um);
+                if (effectiveExpiry == null) continue;
+
+                var effectiveExpiryDate = DateOnly.FromDateTime(effectiveExpiry.Value);
+                int daysLeft = effectiveExpiryDate.DayNumber - today.DayNumber;
                 if (daysLeft < 0 || daysLeft > ExpiryWarningDays) continue;
 
                 bool alreadySent = await db.Alerts.AnyAsync(a =>
@@ -81,8 +86,8 @@ namespace api_test.Services
 
                 string title = daysLeft == 0 ? "Medication expires today!" : "Medication expiring soon";
                 string message = daysLeft == 0
-                    ? $"Your medication \"{um.Medication.Trade_name}\" expires today ({um.ExpiryDate.Value:dd/MM/yyyy})."
-                    : $"Your medication \"{um.Medication.Trade_name}\" will expire in {daysLeft} day(s) on {um.ExpiryDate.Value:dd/MM/yyyy}.";
+                    ? $"Your medication \"{um.Medication.Trade_name}\" expires today ({effectiveExpiryDate:dd/MM/yyyy})."
+                    : $"Your medication \"{um.Medication.Trade_name}\" will expire in {daysLeft} day(s) on {effectiveExpiryDate:dd/MM/yyyy}.";
 
                 db.Alerts.Add(new Alert
                 {

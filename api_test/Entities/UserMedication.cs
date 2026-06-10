@@ -16,6 +16,14 @@
         public DateOnly? StartDate { get; set; }
         public DateOnly? EndDate { get; set; }
         public DateOnly? ExpiryDate { get; set; }
+        public bool IsOpened { get; set; } = false;
+        public DateTime? OpenedDate { get; set; }
+        public int? AfterOpeningDurationValue { get; set; }
+        public string? AfterOpeningDurationUnit { get; set; } = "days";
+        public DateTime? AfterOpeningExpiryDate { get; set; }
+        public DateTime? EffectiveExpiryDate { get; set; }
+        public string? ExpiryReason { get; set; }
+        public string? AfterOpeningSource { get; set; }
 
         public int? CurrentPillCount { get; set; }
         public int? InitialPillCount { get; set; }

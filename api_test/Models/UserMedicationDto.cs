@@ -11,6 +11,15 @@
         public DateTime? StartDate { get; set; }
         public DateTime? EndDate { get; set; }
         public DateTime? ExpiryDate { get; set; }
+        public bool IsOpened { get; set; } = false;
+        public DateTime? OpenedDate { get; set; }
+        public int? AfterOpeningDurationValue { get; set; }
+        public string? AfterOpeningDurationUnit { get; set; } = "days";
+        public DateTime? AfterOpeningExpiryDate { get; set; }
+        public DateTime? EffectiveExpiryDate { get; set; }
+        public string? ExpiryReason { get; set; }
+        public string? AfterOpeningSource { get; set; }
+        public string? AfterOpeningWarning { get; set; }
         public TimeSpan? FirstDoseTime { get; set; }
 
         public int? CurrentPillCount { get; set; }

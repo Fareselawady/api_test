@@ -50,18 +50,20 @@ namespace api_test.Controllers
                 .OrderBy(s => s.ScheduledAt)
                 .ToListAsync();
 
-            // Build a map of medId → hasInteractions to avoid N+1 per schedule
-            var userMedIds = schedules
-                .Select(s => s.UserMedication!.MedId)
+            // Build a map of medicationId → hasInteractions to avoid N+1 per schedule.
+            // Custom medications have no ingredient records, so they are skipped.
+            var medicationIds = schedules
+                .Where(s => UserMedicationFeatureHelper.SupportsInteractions(s.UserMedication))
+                .Select(s => s.UserMedication!.MedicationId!.Value)
                 .Distinct()
                 .ToList();
 
             var interactionMap = new Dictionary<int, bool>();
-            foreach (var medId in userMedIds)
+            foreach (var medicationId in medicationIds)
             {
                 var interactions = await _interactionService
-                    .GetInteractionsForUserMedication(userId, medId);
-                interactionMap[medId] = interactions.Count > 0;
+                    .GetInteractionsForUserMedication(userId, medicationId);
+                interactionMap[medicationId] = interactions.Count > 0;
             }
 
             var result = schedules.Select(s =>
@@ -74,17 +76,17 @@ namespace api_test.Controllers
                     ? s.NotificationTime.Value
                     : s.ScheduledAt.AddMinutes(-15);
 
-                var translatedName = _translation.GetMedName(um.MedId, lang);
-                var medName = string.IsNullOrWhiteSpace(translatedName)
-                    ? um.Medication?.Trade_name ?? string.Empty
-                    : translatedName;
+                var medName = UserMedicationFeatureHelper.GetDisplayName(um, _translation, lang);
+                var supportsInteractions = UserMedicationFeatureHelper.SupportsInteractions(um);
 
                 return new NotificationScheduleDto
                 {
                     ScheduleId = s.Id,
                     UserMedId = um.Id,
-                    MedId = um.MedId,
+                    MedicationId = um.MedicationId,
                     MedName = medName,
+                    MedicationName = medName,
+                    IsCustomMedication = um.IsCustomMedication,
                     Title = _translation.GetNotificationText(
                         "DoseReminder",
                         lang,
@@ -102,15 +104,16 @@ namespace api_test.Controllers
                     PillsPerDose = um.PillsPerDose,
                     CurrentPillCount = um.CurrentPillCount,
                     LowStockThreshold = um.LowStockThreshold,
-                    DosageForm = string.IsNullOrWhiteSpace(um.DosageForm)
-                        ? um.Medication?.Dosage_Form
-                        : um.DosageForm,
-                    QuantityUnit = string.IsNullOrWhiteSpace(um.QuantityUnit)
-                        ? MedicationQuantityHelper.GetSuggestedUnit(um.DosageForm ?? um.Medication?.Dosage_Form)
-                        : um.QuantityUnit,
+                    DosageForm = UserMedicationFeatureHelper.GetDosageForm(um),
+                    QuantityUnit = UserMedicationFeatureHelper.GetQuantityUnit(um),
                     DoseQuantity = MedicationQuantityHelper.ResolveQuantity(um.DoseQuantity, um.PillsPerDose),
                     CurrentQuantity = MedicationQuantityHelper.ResolveQuantity(um.CurrentQuantity, um.CurrentPillCount),
-                    HasInteractions = interactionMap.GetValueOrDefault(um.MedId, false)
+                    HasInteractions = supportsInteractions
+                        && um.MedicationId.HasValue
+                        && interactionMap.GetValueOrDefault(um.MedicationId.Value, false),
+                    SupportsInteractions = supportsInteractions,
+                    SupportsIngredientWarnings = UserMedicationFeatureHelper.SupportsIngredientWarnings(um),
+                    CustomMedicationWarning = UserMedicationFeatureHelper.GetCustomMedicationWarning(um)
                 };
             }).ToList();
 

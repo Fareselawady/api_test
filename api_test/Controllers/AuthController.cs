@@ -58,8 +58,13 @@ namespace api_test.Controllers
             var userMedsResult = userMeds.Select(um => new
             {
                 um.Id,
-                MedId = um.MedId,
-                MedName = um.Medication.Trade_name,
+                um.MedicationId,
+                MedName = UserMedicationFeatureHelper.GetDisplayName(um),
+                MedicationName = UserMedicationFeatureHelper.GetDisplayName(um),
+                um.IsCustomMedication,
+                SupportsInteractions = UserMedicationFeatureHelper.SupportsInteractions(um),
+                SupportsIngredientWarnings = UserMedicationFeatureHelper.SupportsIngredientWarnings(um),
+                CustomMedicationWarning = UserMedicationFeatureHelper.GetCustomMedicationWarning(um),
                 um.Dosage,
                 um.Notes,
                 StartDate = um.StartDate.HasValue ? um.StartDate.Value.ToDateTime(TimeOnly.MinValue) : (DateTime?)null,
@@ -77,12 +82,8 @@ namespace api_test.Controllers
                 um.CurrentPillCount,
                 um.InitialPillCount,
                 um.LowStockThreshold,
-                DosageForm = string.IsNullOrWhiteSpace(um.DosageForm)
-                    ? um.Medication.Dosage_Form
-                    : um.DosageForm,
-                QuantityUnit = string.IsNullOrWhiteSpace(um.QuantityUnit)
-                    ? MedicationQuantityHelper.GetSuggestedUnit(um.DosageForm ?? um.Medication.Dosage_Form)
-                    : um.QuantityUnit,
+                DosageForm = UserMedicationFeatureHelper.GetDosageForm(um),
+                QuantityUnit = UserMedicationFeatureHelper.GetQuantityUnit(um),
                 InitialQuantity = MedicationQuantityHelper.ResolveQuantity(um.InitialQuantity, um.InitialPillCount),
                 CurrentQuantity = MedicationQuantityHelper.ResolveQuantity(um.CurrentQuantity, um.CurrentPillCount),
                 DoseQuantity = MedicationQuantityHelper.ResolveQuantity(um.DoseQuantity, um.PillsPerDose),

@@ -106,7 +106,7 @@ namespace api_test.Controllers
                 .Where(m => medIds.Contains(m.Med_id))
                 .ToListAsync();
 
-            // اعمل dictionary: MedId → List of IngredientIds
+            // اعمل dictionary: medicationId -> List of IngredientIds
             var medIngredientMap = allIngredients
                 .GroupBy(m => m.Med_id)
                 .ToDictionary(g => g.Key, g => g.Select(x => x.Ingredient_id).ToList());
@@ -186,6 +186,7 @@ namespace api_test.Controllers
 
             _context.Medications.Add(medication);
             await _context.SaveChangesAsync();
+            var notifiedUsers = await NotifyMissingMedicationRequestUsersAsync(medication);
 
             return Ok(new
             {
@@ -195,7 +196,8 @@ namespace api_test.Controllers
                 medication.DefaultAfterOpeningValue,
                 medication.DefaultAfterOpeningUnit,
                 medication.RequiresOpeningTracking,
-                medication.AfterOpeningNote
+                medication.AfterOpeningNote,
+                NotifiedMissingMedicationRequestUsers = notifiedUsers
             });
         }
 
@@ -235,10 +237,12 @@ namespace api_test.Controllers
             medication.AfterOpeningNote = dto.AfterOpeningNote;
 
             await _context.SaveChangesAsync();
+            var notifiedUsers = await NotifyMissingMedicationRequestUsersAsync(medication);
 
             return Ok(new
             {
                 Message = "Medication updated successfully.",
+                NotifiedMissingMedicationRequestUsers = notifiedUsers,
                 Medication = new
                 {
                     medication.ID,
@@ -268,6 +272,61 @@ namespace api_test.Controllers
             await _context.SaveChangesAsync();
 
             return Ok(new { Message = $"Medication '{medication.Trade_name}' deleted successfully." });
+        }
+
+        private async Task<int> NotifyMissingMedicationRequestUsersAsync(Medication medication)
+        {
+            if (string.IsNullOrWhiteSpace(medication.Trade_name))
+                return 0;
+
+            var medicationName = medication.Trade_name.Trim();
+            var tickets = await _context.SupportTickets
+                .Where(t => t.Category == SupportCategory.MissingMedicationRequest
+                    && t.Status != SupportStatus.Closed
+                    && t.Message.Contains("Medication name:"))
+                .ToListAsync();
+
+            var matchingTickets = tickets
+                .Where(t => MissingMedicationNameMatches(t.Message, medicationName))
+                .ToList();
+
+            if (matchingTickets.Count == 0)
+                return 0;
+
+            var now = DateTime.UtcNow;
+            foreach (var ticket in matchingTickets)
+            {
+                ticket.Status = SupportStatus.Closed;
+                ticket.AdminReply ??= $"'{medicationName}' has been added to the medication database.";
+                ticket.RepliedAt ??= now;
+
+                _context.Alerts.Add(new Alert
+                {
+                    UserId = ticket.UserId,
+                    Type = "AdminMessage",
+                    Title = "Medication Added to Database",
+                    Message = $"'{medicationName}' is now available in the medication database.",
+                    IsRead = false,
+                    ScheduledAt = now,
+                    CreatedAt = now
+                });
+            }
+
+            await _context.SaveChangesAsync();
+            return matchingTickets.Select(t => t.UserId).Distinct().Count();
+        }
+
+        private static bool MissingMedicationNameMatches(string message, string medicationName)
+        {
+            var lines = message.Split('\n', StringSplitOptions.TrimEntries);
+            var nameLine = lines.FirstOrDefault(line =>
+                line.StartsWith("Medication name:", StringComparison.OrdinalIgnoreCase));
+
+            if (nameLine == null)
+                return false;
+
+            var requestedName = nameLine["Medication name:".Length..].Trim();
+            return requestedName.Equals(medicationName, StringComparison.OrdinalIgnoreCase);
         }
     }
 }

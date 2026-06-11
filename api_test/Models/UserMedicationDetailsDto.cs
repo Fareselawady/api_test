@@ -2,6 +2,8 @@
 {
     public class UserMedicationDetailsDto
     {
+        public string? MedicationName { get; set; }
+        public bool? IsCustomMedication { get; set; }
         public string? Dosage { get; set; }
         public string? Notes { get; set; }
         public DateTime? StartDate { get; set; }

@@ -43,12 +43,14 @@ namespace api_test.Services
                 return warnings; // No ingredients on record → no interactions possible
 
             // ── 3. Get trade names of every medication the user already has ───
-            //    We skip the new medication itself (already saved, same MedId)
-            //    so we query by MedId != newMed.ID to avoid a self-check.
+            //    We skip custom medications and the new medication itself.
             var existingMedNames = await _context.UserMedications
-                .Where(um => um.UserId == userId && um.MedId != newMed.ID)
+                .Where(um => um.UserId == userId
+                    && !um.IsCustomMedication
+                    && um.MedicationId.HasValue
+                    && um.MedicationId != newMed.ID)
                 .Include(um => um.Medication)
-                .Select(um => um.Medication.Trade_name)
+                .Select(um => um.Medication!.Trade_name)
                 .Distinct()
                 .ToListAsync();
 
@@ -118,14 +120,17 @@ namespace api_test.Services
 
             var userMeds = await _context.UserMedications
                 .Include(x => x.Medication)
-                .Where(x => x.UserId == userId && x.MedId != medId)
+                .Where(x => x.UserId == userId
+                    && !x.IsCustomMedication
+                    && x.MedicationId.HasValue
+                    && x.MedicationId != medId)
                 .ToListAsync();
 
             foreach (var userMed in userMeds)
             {
                 var otherIngredients =
                     await _context.Med_Ingredients_Link
-                    .Where(x => x.Med_id == userMed.MedId)
+                    .Where(x => x.Med_id == userMed.MedicationId!.Value)
                     .Select(x => x.Ingredient_id)
                     .ToListAsync();
 
@@ -145,7 +150,7 @@ namespace api_test.Services
                 {
                     result.Add(new MedicationInteractionDto
                     {
-                        WithMedication = userMed.Medication.Trade_name,
+                        WithMedication = userMed.Medication?.Trade_name ?? userMed.MedicationName,
                         Reason = string.Join(", ", interactions
     .Select(i => i.Interaction_type)
     .Where(t => !string.IsNullOrWhiteSpace(t))
@@ -174,9 +179,12 @@ namespace api_test.Services
             if (newMedIngredients.Count == 0) return warnings;
 
             var existingMeds = await _context.UserMedications
-                .Where(um => um.UserId == userId && um.MedId != newMed.ID)
+                .Where(um => um.UserId == userId
+                    && !um.IsCustomMedication
+                    && um.MedicationId.HasValue
+                    && um.MedicationId != newMed.ID)
                 .Include(um => um.Medication)
-                .Select(um => new { um.Medication.ID, um.Medication.Trade_name })
+                .Select(um => new { ID = um.MedicationId!.Value, um.Medication!.Trade_name })
                 .Distinct()
                 .ToListAsync();
             if (existingMeds.Count == 0) return warnings;

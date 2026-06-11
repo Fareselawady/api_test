@@ -7,8 +7,10 @@
         public int UserId { get; set; }
         public User User { get; set; } = null!;
 
-        public int MedId { get; set; }
-        public Medication Medication { get; set; } = null!;
+        public int? MedicationId { get; set; }
+        public Medication? Medication { get; set; }
+        public string MedicationName { get; set; } = string.Empty;
+        public bool IsCustomMedication { get; set; } = false;
 
         public string? Dosage { get; set; }
         public string? Notes { get; set; }

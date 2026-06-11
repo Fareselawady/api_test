@@ -10,20 +10,24 @@ namespace api_test.Services
 
             return normalized switch
             {
-                "TAB" or "TAB_EC" or "TAB_SR" or "TAB_EFF" or "TAB_CHEW"
+                "TABLET" or "TAB" or "TAB_EC" or "TAB_SR" or "TAB_EFF" or "TAB_CHEW"
                     or "TAB_MR" or "TAB_PR" or "TAB_ER" or "TAB_SC" or "TAB_DISPERSIBLE" => "tablet",
 
-                "CAPSULE" or "CAPSULE_SG" or "CAPSULE_SR" or "CAPSULE_EC" or "CAPSULE_SG_EC" => "capsule",
+                "CAP" or "CAPSULE" or "CAPSULE_SG" or "CAPSULE_SR" or "CAPSULE_EC" or "CAPSULE_SG_EC" => "capsule",
 
                 "SYRUP" or "SUSPENSION" or "ORAL_SOLUTION" => "ml",
 
-                "ORAL_DROP" or "ORAL_DROPS" => "drops",
+                "ORAL_DROP" or "ORAL_DROPS" or "EYE_DROP" or "EYE_DROPS" or "OPHTHALMIC_SOLUTION" => "drops",
 
-                "GEL" or "EMULGEL" or "OINTMENT" or "CREAM" => "g",
+                "INJECTION" or "AMPOULE" => "ampoule",
+
+                "CREAM" or "GEL" or "EMULGEL" or "OINTMENT" => "g",
+
+                "INHALER" => "puffs",
+
+                "OTHER" => DefaultUnit,
 
                 "TOPICAL_PATCH" => "patch",
-
-                "AMPOULE" => "ampoule",
 
                 "VIAL_POWDER" or "VIAL" => "vial",
 

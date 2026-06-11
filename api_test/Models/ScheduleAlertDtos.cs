@@ -5,8 +5,10 @@
     {
         public int Id { get; set; }
         public int UserMedId { get; set; }
-        public int MedId { get; set; }                        // ← مضاف عشان نعمل interaction check
+        public int? MedicationId { get; set; }
         public string MedName { get; set; } = string.Empty;
+        public string MedicationName { get; set; } = string.Empty;
+        public bool IsCustomMedication { get; set; }
         public string ScheduledAt { get; set; } = string.Empty;
         public string NotificationTime { get; set; } = string.Empty;
         public string Status { get; set; } = string.Empty;
@@ -23,6 +25,9 @@
         /// other medication the user currently has (not just today's doses).
         /// </summary>
         public bool HasInteractions { get; set; } = false;
+        public bool SupportsInteractions { get; set; }
+        public bool SupportsIngredientWarnings { get; set; }
+        public string? CustomMedicationWarning { get; set; }
 
         /// <summary>
         /// List of interactions — only populated for today-schedules endpoint.

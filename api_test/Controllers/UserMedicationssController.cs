@@ -89,28 +89,36 @@ namespace api_test.Controllers
                     dto.PeriodValue = 1;
             }
 
-            // ── Find medication ───────────────────────────────────────────────
-            var medId_add = _translationService.FindMedIdByName(dto.MedicationName);
-            var medication = medId_add.HasValue
-                ? await _context.Medications.FirstOrDefaultAsync(m => m.ID == medId_add.Value)
-                : await _context.Medications.FirstOrDefaultAsync(m => m.Trade_name == dto.MedicationName);
+            // ── Resolve database/custom medication ───────────────────────────
+            var resolvedMedication = await ResolveMedicationAsync(
+                dto.MedicationId,
+                dto.MedicationName,
+                dto.IsCustomMedication);
 
-            if (medication == null)
-                return NotFound(new { Message = $"Medication '{dto.MedicationName}' not found." });
+            if (resolvedMedication.Error != null)
+                return BadRequest(new { Message = resolvedMedication.Error });
 
-            var alreadyExists = await _context.UserMedications
-                .AnyAsync(um => um.UserId == userId && um.MedId == medication.ID);
+            var medication = resolvedMedication.Medication;
+            var medicationName = resolvedMedication.MedicationName;
+            var isCustomMedication = resolvedMedication.IsCustomMedication;
+
+            var alreadyExists = await UserMedicationAlreadyExistsAsync(
+                userId,
+                medication?.ID,
+                medicationName,
+                ignoreUserMedicationId: null);
 
             if (alreadyExists)
-                return BadRequest(new { Message = $"You already have '{dto.MedicationName}' in your medications." });
+                return BadRequest(new { Message = $"You already have '{medicationName}' in your medications." });
 
-            var unitError = MedicationQuantityHelper.ValidateUnit(medication.Dosage_Form, dto.QuantityUnit);
+            var dosageForm = isCustomMedication
+                ? dto.DosageForm
+                : (string.IsNullOrWhiteSpace(medication?.Dosage_Form) ? dto.DosageForm : medication.Dosage_Form);
+
+            var unitError = MedicationQuantityHelper.ValidateUnit(dosageForm, dto.QuantityUnit);
             if (unitError != null)
                 return BadRequest(new { Message = unitError });
 
-            var dosageForm = string.IsNullOrWhiteSpace(medication.Dosage_Form)
-                ? null
-                : medication.Dosage_Form;
             var quantityUnit = MedicationQuantityHelper.ResolveUnit(dosageForm, dto.QuantityUnit);
             var initialQuantity = MedicationQuantityHelper.ResolveQuantity(dto.InitialQuantity, dto.InitialPillCount);
             var currentQuantity = MedicationQuantityHelper.ResolveQuantity(dto.CurrentQuantity, dto.CurrentPillCount);
@@ -133,7 +141,9 @@ namespace api_test.Controllers
             var userMed = new UserMedication
             {
                 UserId = userId,
-                MedId = medication.ID,
+                MedicationId = medication?.ID,
+                MedicationName = medicationName,
+                IsCustomMedication = isCustomMedication,
                 Dosage = dto.Dosage,
                 Notes = dto.Notes,
                 StartDate = dto.StartDate.HasValue ? DateOnly.FromDateTime(dto.StartDate.Value) : null,
@@ -170,12 +180,20 @@ namespace api_test.Controllers
             else
                 await _scheduleService.GenerateScheduleAsync(userMed);
 
-            var warnings = await _interactionService
-    .CheckInteractionsForNewMedWithLangAsync(userId, medication.Trade_name!, lang);
+            var warnings = UserMedicationFeatureHelper.SupportsInteractions(userMed)
+                ? await _interactionService.CheckInteractionsForNewMedWithLangAsync(userId, medicationName, lang)
+                : new List<InteractionWarningDto>();
 
             return Ok(new
             {
-                Message = $"'{dto.MedicationName}' added to your medications successfully.",
+                Message = $"'{medicationName}' added to your medications successfully.",
+                userMed.Id,
+                userMed.MedicationId,
+                userMed.MedicationName,
+                userMed.IsCustomMedication,
+                SupportsInteractions = UserMedicationFeatureHelper.SupportsInteractions(userMed),
+                SupportsIngredientWarnings = UserMedicationFeatureHelper.SupportsIngredientWarnings(userMed),
+                CustomMedicationWarning = UserMedicationFeatureHelper.GetCustomMedicationWarning(userMed),
                 ExpiryDate = userMed.ExpiryDate,
                 userMed.IsOpened,
                 userMed.OpenedDate,
@@ -186,7 +204,6 @@ namespace api_test.Controllers
                 userMed.ExpiryReason,
                 userMed.AfterOpeningSource,
                 AfterOpeningWarning = MedicationExpiryHelper.GetWarning(userMed),
-                MedicationName = medication.Trade_name,
                 DosageForm = userMed.DosageForm,
                 QuantityUnit = userMed.QuantityUnit,
                 InitialQuantity = userMed.InitialQuantity,
@@ -231,8 +248,9 @@ namespace api_test.Controllers
 
             foreach (var um in userMeds)
             {
-                var rawInteractions = await _interactionService
-     .GetInteractionsForUserMedication(userId, um.MedId);
+                var rawInteractions = UserMedicationFeatureHelper.SupportsInteractions(um)
+                    ? await _interactionService.GetInteractionsForUserMedication(userId, um.MedicationId!.Value)
+                    : new List<MedicationInteractionDto>();
 
                 var interactions = rawInteractions.Select(i =>
                 {
@@ -260,11 +278,7 @@ namespace api_test.Controllers
                     };
                 }).ToList();
 
-                string translatedName = _translationService.GetMedName(um.MedId, lang);
-
-                string finalName = string.IsNullOrWhiteSpace(translatedName)
-     ? um.Medication.Trade_name ?? string.Empty
-     : translatedName;
+                string finalName = UserMedicationFeatureHelper.GetDisplayName(um, _translationService, lang);
 
                 string? scheduleType = InferScheduleType(um);
 
@@ -285,8 +299,12 @@ namespace api_test.Controllers
                 result.Add(new UserMedicationDto
                 {
                     Id = um.Id,
-                    MedId = um.MedId,
+                    MedicationId = um.MedicationId,
                     MedicationName = finalName,
+                    IsCustomMedication = um.IsCustomMedication,
+                    SupportsInteractions = UserMedicationFeatureHelper.SupportsInteractions(um),
+                    SupportsIngredientWarnings = UserMedicationFeatureHelper.SupportsIngredientWarnings(um),
+                    CustomMedicationWarning = UserMedicationFeatureHelper.GetCustomMedicationWarning(um),
                     Dosage = um.Dosage,
                     Notes = um.Notes,
                     StartDate = um.StartDate?.ToDateTime(TimeOnly.MinValue),
@@ -305,12 +323,8 @@ namespace api_test.Controllers
                     InitialPillCount = um.InitialPillCount,
                     LowStockThreshold = um.LowStockThreshold,
                     PillsPerDose = um.PillsPerDose,
-                    DosageForm = string.IsNullOrWhiteSpace(um.DosageForm)
-                        ? um.Medication?.Dosage_Form
-                        : um.DosageForm,
-                    QuantityUnit = string.IsNullOrWhiteSpace(um.QuantityUnit)
-                        ? MedicationQuantityHelper.GetSuggestedUnit(um.DosageForm ?? um.Medication?.Dosage_Form)
-                        : um.QuantityUnit,
+                    DosageForm = UserMedicationFeatureHelper.GetDosageForm(um),
+                    QuantityUnit = UserMedicationFeatureHelper.GetQuantityUnit(um),
                     InitialQuantity = MedicationQuantityHelper.ResolveQuantity(um.InitialQuantity, um.InitialPillCount),
                     CurrentQuantity = MedicationQuantityHelper.ResolveQuantity(um.CurrentQuantity, um.CurrentPillCount),
                     DoseQuantity = MedicationQuantityHelper.ResolveQuantity(um.DoseQuantity, um.PillsPerDose),
@@ -370,9 +384,36 @@ namespace api_test.Controllers
             if (afterOpeningError != null)
                 return BadRequest(new { Message = afterOpeningError });
 
-            var effectiveDosageForm = string.IsNullOrWhiteSpace(userMed.Medication?.Dosage_Form)
-                ? userMed.DosageForm
-                : userMed.Medication.Dosage_Form;
+            if (dto.MedicationId.HasValue || dto.MedicationName != null || dto.IsCustomMedication.HasValue)
+            {
+                var resolvedMedication = await ResolveMedicationAsync(
+                    dto.MedicationId,
+                    dto.MedicationName ?? userMed.MedicationName,
+                    dto.IsCustomMedication ?? userMed.IsCustomMedication);
+
+                if (resolvedMedication.Error != null)
+                    return BadRequest(new { Message = resolvedMedication.Error });
+
+                var alreadyExists = await UserMedicationAlreadyExistsAsync(
+                    userId,
+                    resolvedMedication.Medication?.ID,
+                    resolvedMedication.MedicationName,
+                    id);
+
+                if (alreadyExists)
+                    return BadRequest(new { Message = $"You already have '{resolvedMedication.MedicationName}' in your medications." });
+
+                userMed.MedicationId = resolvedMedication.Medication?.ID;
+                userMed.Medication = resolvedMedication.Medication;
+                userMed.MedicationName = resolvedMedication.MedicationName;
+                userMed.IsCustomMedication = resolvedMedication.IsCustomMedication;
+            }
+
+            var effectiveDosageForm = userMed.IsCustomMedication
+                ? (dto.DosageForm ?? userMed.DosageForm)
+                : (string.IsNullOrWhiteSpace(userMed.Medication?.Dosage_Form)
+                    ? (dto.DosageForm ?? userMed.DosageForm)
+                    : userMed.Medication.Dosage_Form);
             var unitError = MedicationQuantityHelper.ValidateUnit(effectiveDosageForm, dto.QuantityUnit);
             if (unitError != null)
                 return BadRequest(new { Message = unitError });
@@ -437,7 +478,7 @@ namespace api_test.Controllers
             if (dto.DoseQuantity.HasValue) userMed.DoseQuantity = dto.DoseQuantity;
             if (dto.QuantityUnit != null) userMed.QuantityUnit = MedicationQuantityHelper.ResolveUnit(effectiveDosageForm, dto.QuantityUnit);
 
-            if (string.IsNullOrWhiteSpace(userMed.DosageForm))
+            if (dto.DosageForm != null || userMed.IsCustomMedication || string.IsNullOrWhiteSpace(userMed.DosageForm))
                 userMed.DosageForm = effectiveDosageForm;
             if (string.IsNullOrWhiteSpace(userMed.QuantityUnit))
                 userMed.QuantityUnit = MedicationQuantityHelper.ResolveUnit(effectiveDosageForm, null);
@@ -574,7 +615,12 @@ namespace api_test.Controllers
                 userMed.ExpiryReason,
                 userMed.AfterOpeningSource,
                 AfterOpeningWarning = MedicationExpiryHelper.GetWarning(userMed),
-                MedicationName = userMed.Medication?.Trade_name,
+                userMed.MedicationId,
+                MedicationName = UserMedicationFeatureHelper.GetDisplayName(userMed, _translationService),
+                userMed.IsCustomMedication,
+                SupportsInteractions = UserMedicationFeatureHelper.SupportsInteractions(userMed),
+                SupportsIngredientWarnings = UserMedicationFeatureHelper.SupportsIngredientWarnings(userMed),
+                CustomMedicationWarning = UserMedicationFeatureHelper.GetCustomMedicationWarning(userMed),
                 DosageForm = userMed.DosageForm,
                 QuantityUnit = userMed.QuantityUnit,
                 InitialQuantity = userMed.InitialQuantity,
@@ -582,6 +628,71 @@ namespace api_test.Controllers
                 DoseQuantity = userMed.DoseQuantity,
                 LowStockThreshold = userMed.LowStockThreshold,
                 ScheduleRegenerated = scheduleChanged
+            });
+        }
+
+        // ================= REQUEST DATABASE ADDITION =================
+        [HttpPost("{id}/request-add-to-database")]
+        public async Task<ActionResult> RequestMedicationAddToDatabase(int id)
+        {
+            var userId = GetUserId();
+
+            var userMed = await _context.UserMedications
+                .Include(um => um.Medication)
+                .FirstOrDefaultAsync(um => um.Id == id && um.UserId == userId);
+
+            if (userMed == null)
+                return NotFound(new { Message = "UserMedication not found." });
+
+            if (UserMedicationFeatureHelper.SupportsDatabaseFeatures(userMed))
+                return BadRequest(new { Message = "This medication already exists in the database." });
+
+            var medicationName = UserMedicationFeatureHelper.GetDisplayName(userMed);
+            if (string.IsNullOrWhiteSpace(medicationName))
+                return BadRequest(new { Message = "medicationName is required." });
+
+            var dosageForm = UserMedicationFeatureHelper.GetDosageForm(userMed);
+            var quantityUnit = UserMedicationFeatureHelper.GetQuantityUnit(userMed);
+            var now = DateTime.UtcNow;
+            var message = BuildMissingMedicationRequestMessage(medicationName, dosageForm, quantityUnit);
+
+            var existingOpenTicket = await _context.SupportTickets.AnyAsync(t =>
+                t.UserId == userId
+                && t.Category == SupportCategory.MissingMedicationRequest
+                && t.Status != SupportStatus.Closed
+                && t.Message.Contains($"Medication name: {medicationName}"));
+
+            if (existingOpenTicket)
+                return Ok(new { Message = "A request for this medication is already open." });
+
+            var ticket = new SupportTicket
+            {
+                UserId = userId,
+                Category = SupportCategory.MissingMedicationRequest,
+                Message = message,
+                Status = SupportStatus.Open,
+                CreatedAt = now
+            };
+
+            _context.SupportTickets.Add(ticket);
+            _context.Alerts.Add(new Alert
+            {
+                UserId = userId,
+                Type = "AdminMessage",
+                Title = "Support Request Submitted",
+                Message = "Your missing medication request was submitted successfully.",
+                IsRead = false,
+                ScheduledAt = now,
+                CreatedAt = now
+            });
+
+            await _context.SaveChangesAsync();
+
+            return Ok(new
+            {
+                Message = "Missing medication request submitted successfully.",
+                TicketId = ticket.Id,
+                Status = ticket.Status.ToString()
             });
         }
 
@@ -608,40 +719,62 @@ namespace api_test.Controllers
         {
             var userId = GetUserId();
 
-            var medId_init = _translationService.FindMedIdByName(dto.MedicationName);
-            var medication = medId_init.HasValue
-                ? await _context.Medications.FirstOrDefaultAsync(m => m.ID == medId_init.Value)
-                : await _context.Medications.FirstOrDefaultAsync(m => m.Trade_name == dto.MedicationName);
+            var resolvedMedication = await ResolveMedicationAsync(
+                dto.MedicationId,
+                dto.MedicationName,
+                dto.IsCustomMedication);
 
-            if (medication == null)
-                return NotFound(new { Message = $"Medication '{dto.MedicationName}' not found." });
+            if (resolvedMedication.Error != null)
+                return BadRequest(new { Message = resolvedMedication.Error });
 
-            var alreadyExists = await _context.UserMedications
-                .AnyAsync(um => um.UserId == userId && um.MedId == medication.ID);
+            var medication = resolvedMedication.Medication;
+            var medicationName = resolvedMedication.MedicationName;
+            var isCustomMedication = resolvedMedication.IsCustomMedication;
+
+            var alreadyExists = await UserMedicationAlreadyExistsAsync(
+                userId,
+                medication?.ID,
+                medicationName,
+                ignoreUserMedicationId: null);
 
             if (alreadyExists)
-                return BadRequest(new { Message = $"You already have '{dto.MedicationName}' in your medications." });
+                return BadRequest(new { Message = $"You already have '{medicationName}' in your medications." });
+
+            var dosageForm = isCustomMedication
+                ? dto.DosageForm
+                : (string.IsNullOrWhiteSpace(medication?.Dosage_Form) ? dto.DosageForm : medication.Dosage_Form);
+            var unitError = MedicationQuantityHelper.ValidateUnit(dosageForm, dto.QuantityUnit);
+            if (unitError != null)
+                return BadRequest(new { Message = unitError });
 
             var userMed = new UserMedication
             {
                 UserId = userId,
-                MedId = medication.ID,
-                DosageForm = medication.Dosage_Form,
-                QuantityUnit = MedicationQuantityHelper.GetSuggestedUnit(medication.Dosage_Form)
+                MedicationId = medication?.ID,
+                MedicationName = medicationName,
+                IsCustomMedication = isCustomMedication,
+                DosageForm = dosageForm,
+                QuantityUnit = MedicationQuantityHelper.ResolveUnit(dosageForm, dto.QuantityUnit)
             };
 
             MedicationExpiryHelper.Apply(userMed, medication, DateTime.UtcNow);
 
             _context.UserMedications.Add(userMed);
             await _context.SaveChangesAsync();
-            var warnings = await _interactionService
-                .CheckInteractionsForNewMedWithLangAsync(userId, medication.Trade_name!, lang);
+            var warnings = UserMedicationFeatureHelper.SupportsInteractions(userMed)
+                ? await _interactionService.CheckInteractionsForNewMedWithLangAsync(userId, medicationName, lang)
+                : new List<InteractionWarningDto>();
 
             return Ok(new
             {
                 Message = "Medication selected successfully.",
                 UserMedicationId = userMed.Id,
-                MedicationName = medication.Trade_name,
+                userMed.MedicationId,
+                MedicationName = medicationName,
+                userMed.IsCustomMedication,
+                SupportsInteractions = UserMedicationFeatureHelper.SupportsInteractions(userMed),
+                SupportsIngredientWarnings = UserMedicationFeatureHelper.SupportsIngredientWarnings(userMed),
+                CustomMedicationWarning = UserMedicationFeatureHelper.GetCustomMedicationWarning(userMed),
                 DosageForm = userMed.DosageForm,
                 QuantityUnit = userMed.QuantityUnit,
                 InteractionWarnings = warnings.Count > 0
@@ -690,9 +823,27 @@ namespace api_test.Controllers
             if (afterOpeningError != null)
                 return BadRequest(new { Message = afterOpeningError });
 
-            var effectiveDosageForm = string.IsNullOrWhiteSpace(userMed.Medication?.Dosage_Form)
-                ? userMed.DosageForm
-                : userMed.Medication.Dosage_Form;
+            if (dto.IsCustomMedication == true && !userMed.IsCustomMedication)
+            {
+                userMed.MedicationId = null;
+                userMed.Medication = null;
+                userMed.IsCustomMedication = true;
+                userMed.MedicationName = string.IsNullOrWhiteSpace(dto.MedicationName)
+                    ? UserMedicationFeatureHelper.GetDisplayName(userMed)
+                    : dto.MedicationName.Trim();
+            }
+            else if (dto.MedicationName != null && userMed.IsCustomMedication)
+            {
+                if (string.IsNullOrWhiteSpace(dto.MedicationName))
+                    return BadRequest(new { Message = "medicationName is required for custom medications." });
+                userMed.MedicationName = dto.MedicationName.Trim();
+            }
+
+            var effectiveDosageForm = userMed.IsCustomMedication
+                ? (dto.DosageForm ?? userMed.DosageForm)
+                : (string.IsNullOrWhiteSpace(userMed.Medication?.Dosage_Form)
+                    ? (dto.DosageForm ?? userMed.DosageForm)
+                    : userMed.Medication.Dosage_Form);
             var unitError = MedicationQuantityHelper.ValidateUnit(effectiveDosageForm, dto.QuantityUnit);
             if (unitError != null)
                 return BadRequest(new { Message = unitError });
@@ -868,7 +1019,12 @@ namespace api_test.Controllers
                 userMed.ExpiryReason,
                 userMed.AfterOpeningSource,
                 AfterOpeningWarning = MedicationExpiryHelper.GetWarning(userMed),
-                MedicationName = userMed.Medication?.Trade_name,
+                userMed.MedicationId,
+                MedicationName = UserMedicationFeatureHelper.GetDisplayName(userMed, _translationService),
+                userMed.IsCustomMedication,
+                SupportsInteractions = UserMedicationFeatureHelper.SupportsInteractions(userMed),
+                SupportsIngredientWarnings = UserMedicationFeatureHelper.SupportsIngredientWarnings(userMed),
+                CustomMedicationWarning = UserMedicationFeatureHelper.GetCustomMedicationWarning(userMed),
                 DosageForm = userMed.DosageForm,
                 QuantityUnit = userMed.QuantityUnit,
                 InitialQuantity = userMed.InitialQuantity,
@@ -879,6 +1035,108 @@ namespace api_test.Controllers
         }
 
         // ================= HELPERS =================
+        private sealed class ResolvedMedication
+        {
+            public Medication? Medication { get; init; }
+            public string MedicationName { get; init; } = string.Empty;
+            public bool IsCustomMedication { get; init; }
+            public string? Error { get; init; }
+        }
+
+        private async Task<ResolvedMedication> ResolveMedicationAsync(
+            int? medicationId,
+            string? medicationName,
+            bool? isCustomMedication)
+        {
+            if (medicationId.HasValue)
+            {
+                var medication = await _context.Medications
+                    .FirstOrDefaultAsync(m => m.ID == medicationId.Value);
+
+                if (medication == null)
+                    return new ResolvedMedication { Error = $"Medication id '{medicationId.Value}' not found." };
+
+                return new ResolvedMedication
+                {
+                    Medication = medication,
+                    MedicationName = medication.Trade_name ?? medicationName?.Trim() ?? string.Empty,
+                    IsCustomMedication = false
+                };
+            }
+
+            if (string.IsNullOrWhiteSpace(medicationName))
+                return new ResolvedMedication
+                {
+                    Error = "Either medicationId or medicationName is required."
+                };
+
+            var normalizedName = medicationName.Trim();
+            if (isCustomMedication == true)
+            {
+                return new ResolvedMedication
+                {
+                    MedicationName = normalizedName,
+                    IsCustomMedication = true
+                };
+            }
+
+            var translatedMedId = _translationService.FindMedIdByName(normalizedName);
+            var medicationByName = translatedMedId.HasValue
+                ? await _context.Medications.FirstOrDefaultAsync(m => m.ID == translatedMedId.Value)
+                : await _context.Medications.FirstOrDefaultAsync(m => m.Trade_name == normalizedName);
+
+            if (medicationByName != null)
+            {
+                return new ResolvedMedication
+                {
+                    Medication = medicationByName,
+                    MedicationName = medicationByName.Trade_name ?? normalizedName,
+                    IsCustomMedication = false
+                };
+            }
+
+            return new ResolvedMedication
+            {
+                MedicationName = normalizedName,
+                IsCustomMedication = true
+            };
+        }
+
+        private async Task<bool> UserMedicationAlreadyExistsAsync(
+            int userId,
+            int? medicationId,
+            string medicationName,
+            int? ignoreUserMedicationId)
+        {
+            var query = _context.UserMedications
+                .Where(um => um.UserId == userId);
+
+            if (ignoreUserMedicationId.HasValue)
+                query = query.Where(um => um.Id != ignoreUserMedicationId.Value);
+
+            if (medicationId.HasValue)
+            {
+                return await query.AnyAsync(um =>
+                    um.MedicationId == medicationId.Value
+                    || um.MedicationName == medicationName);
+            }
+
+            return await query.AnyAsync(um => um.MedicationName == medicationName);
+        }
+
+        private static string BuildMissingMedicationRequestMessage(
+            string medicationName,
+            string? dosageForm,
+            string? quantityUnit)
+        {
+            return
+                "A user tried to add a medication that is not available in the database.\n\n" +
+                $"Medication name: {medicationName}\n" +
+                $"Dosage form: {dosageForm ?? "Not provided"}\n" +
+                $"Quantity unit: {quantityUnit ?? "unit"}\n\n" +
+                "Please review this medication and consider adding it to the medication database.";
+        }
+
         private int GetUserId()
         {
             var claim = User.FindFirst(ClaimTypes.NameIdentifier);

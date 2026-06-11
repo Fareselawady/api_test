@@ -71,6 +71,7 @@ namespace api_test.Services
 
             foreach (var um in meds)
             {
+                var medName = UserMedicationFeatureHelper.GetDisplayName(um);
                 var effectiveExpiry = MedicationExpiryHelper.GetEffectiveExpiryDate(um);
                 if (effectiveExpiry == null) continue;
 
@@ -86,8 +87,8 @@ namespace api_test.Services
 
                 string title = daysLeft == 0 ? "Medication expires today!" : "Medication expiring soon";
                 string message = daysLeft == 0
-                    ? $"Your medication \"{um.Medication.Trade_name}\" expires today ({effectiveExpiryDate:dd/MM/yyyy})."
-                    : $"Your medication \"{um.Medication.Trade_name}\" will expire in {daysLeft} day(s) on {effectiveExpiryDate:dd/MM/yyyy}.";
+                    ? $"Your medication \"{medName}\" expires today ({effectiveExpiryDate:dd/MM/yyyy})."
+                    : $"Your medication \"{medName}\" will expire in {daysLeft} day(s) on {effectiveExpiryDate:dd/MM/yyyy}.";
 
                 db.Alerts.Add(new Alert
                 {
@@ -124,11 +125,12 @@ namespace api_test.Services
             foreach (var schedule in upcoming)
             {
                 var um = schedule.UserMedication;
+                var medName = UserMedicationFeatureHelper.GetDisplayName(um);
                 int minsLeft = (int)(schedule.ScheduledAt - now).TotalMinutes;
 
                 string message = minsLeft <= 1
-                    ? $"It's time to take your dose of \"{um.Medication.Trade_name}\" - {um.Dosage}"
-                    : $"Reminder: your dose of \"{um.Medication.Trade_name}\" is due in {minsLeft} minute(s) - {um.Dosage}";
+                    ? $"It's time to take your dose of \"{medName}\" - {um.Dosage}"
+                    : $"Reminder: your dose of \"{medName}\" is due in {minsLeft} minute(s) - {um.Dosage}";
 
                 db.Alerts.Add(new Alert
                 {
@@ -168,6 +170,7 @@ namespace api_test.Services
             foreach (var schedule in snoozed)
             {
                 var um = schedule.UserMedication;
+                var medName = UserMedicationFeatureHelper.GetDisplayName(um);
 
                 // lو وصل للحد الأقصى → Missed
                 if (schedule.SnoozeCount > MaxRetries)
@@ -183,7 +186,7 @@ namespace api_test.Services
                         MedicationScheduleId = schedule.Id,
                         Type = "MissedDose",
                         Title = "Missed Dose",
-                        Message = $"You missed your dose of \"{um.Medication.Trade_name}\". " +
+                        Message = $"You missed your dose of \"{medName}\". " +
                                                $"Please consult your schedule.",
                         IsRead = false,
                         ScheduledAt = schedule.ScheduledAt,
@@ -202,7 +205,7 @@ namespace api_test.Services
                     MedicationScheduleId = schedule.Id,
                     Type = "DoseReminder",
                     Title = $"Dose Reminder (snooze {schedule.SnoozeCount}/{MaxRetries})",
-                    Message = $"Reminder: take your dose of \"{um.Medication.Trade_name}\" - {um.Dosage}",
+                    Message = $"Reminder: take your dose of \"{medName}\" - {um.Dosage}",
                     IsRead = false,
                     ScheduledAt = schedule.SnoozedUntil!.Value,
                     CreatedAt = now
@@ -239,6 +242,7 @@ namespace api_test.Services
             foreach (var schedule in overdue)
             {
                 var um = schedule.UserMedication;
+                var medName = UserMedicationFeatureHelper.GetDisplayName(um);
 
                 // Check if enough time has passed since last reminder (1 hour)
                 var lastReminderTime = schedule.ReminderSent
@@ -260,7 +264,7 @@ namespace api_test.Services
                         MedicationScheduleId = schedule.Id,
                         Type = "MissedDose",
                         Title = "Missed Dose",
-                        Message = $"You missed your dose of \"{um.Medication.Trade_name}\". " +
+                        Message = $"You missed your dose of \"{medName}\". " +
                                                $"Please consult your schedule.",
                         IsRead = false,
                         ScheduledAt = schedule.ScheduledAt,
@@ -282,7 +286,7 @@ namespace api_test.Services
                     MedicationScheduleId = schedule.Id,
                     Type = "DoseReminder",
                     Title = $"Dose Reminder (retry {schedule.SnoozeCount}/{MaxRetries})",
-                    Message = $"Don't forget your dose of \"{um.Medication.Trade_name}\" - {um.Dosage}",
+                    Message = $"Don't forget your dose of \"{medName}\" - {um.Dosage}",
                     IsRead = false,
                     ScheduledAt = now,
                     CreatedAt = now

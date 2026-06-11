@@ -2,7 +2,10 @@
 {
     public class InitUserMedicationDto
     {
-        public string MedicationName { get; set; } = null!;
-
+        public int? MedicationId { get; set; }
+        public string? MedicationName { get; set; }
+        public bool? IsCustomMedication { get; set; }
+        public string? DosageForm { get; set; }
+        public string? QuantityUnit { get; set; }
     }
 }

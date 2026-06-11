@@ -271,13 +271,7 @@ namespace api_test.Services
 
         private string GetMedicationName(Alert alert, string lang)
         {
-            var med = alert.UserMedication?.Medication;
-            if (med is null) return string.Empty;
-
-            var translated = _translation.GetMedName(med.ID, lang);
-            return string.IsNullOrWhiteSpace(translated)
-                ? med.Trade_name ?? string.Empty
-                : translated;
+            return UserMedicationFeatureHelper.GetDisplayName(alert.UserMedication, _translation, lang);
         }
 
         private static string GetAdminMessageKey(string? title)

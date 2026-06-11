@@ -3,8 +3,12 @@
     public class UserMedicationDto
     {
         public int Id { get; set; }
-        public int MedId { get; set; }
-        public string? MedicationName { get; set; }
+        public int? MedicationId { get; set; }
+        public string MedicationName { get; set; } = string.Empty;
+        public bool IsCustomMedication { get; set; }
+        public bool SupportsInteractions { get; set; }
+        public bool SupportsIngredientWarnings { get; set; }
+        public string? CustomMedicationWarning { get; set; }
         public string? Dosage { get; set; }
         public string? Notes { get; set; }
 

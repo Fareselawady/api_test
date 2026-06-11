@@ -44,6 +44,9 @@ namespace api_test.Data
 
             modelBuilder.Entity<UserMedication>(entity =>
             {
+                entity.Property(e => e.MedicationId).HasColumnName("MedId");
+                entity.Property(e => e.MedicationName).HasDefaultValue(string.Empty);
+                entity.Property(e => e.IsCustomMedication).HasDefaultValue(false);
                 entity.Property(e => e.StartDate).HasConversion(dateOnlyConverter);
                 entity.Property(e => e.EndDate).HasConversion(dateOnlyConverter);
                 entity.Property(e => e.ExpiryDate).HasConversion(dateOnlyConverter);
@@ -133,8 +136,8 @@ namespace api_test.Data
             modelBuilder.Entity<UserMedication>()
                 .HasOne(um => um.Medication)
                 .WithMany(m => m.UserMedications)
-                .HasForeignKey(um => um.MedId)
-                .OnDelete(DeleteBehavior.Cascade);
+                .HasForeignKey(um => um.MedicationId)
+                .OnDelete(DeleteBehavior.SetNull);
 
             modelBuilder.Entity<MedicationSchedule>()
                 .HasOne(ms => ms.UserMedication)

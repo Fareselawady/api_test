@@ -7,7 +7,8 @@
         PaymentProblem,
         PremiumSubscription,
         Suggestion,
-        Other
+        Other,
+        MissingMedicationRequest
     }
 
     public enum SupportStatus

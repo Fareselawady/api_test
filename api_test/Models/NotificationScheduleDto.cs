@@ -8,8 +8,10 @@
     {
         public int ScheduleId { get; set; }
         public int UserMedId { get; set; }
-        public int MedId { get; set; }
+        public int? MedicationId { get; set; }
         public string MedName { get; set; } = string.Empty;
+        public string MedicationName { get; set; } = string.Empty;
+        public bool IsCustomMedication { get; set; }
         public string Title { get; set; } = string.Empty;
         public string Message { get; set; } = string.Empty;
 
@@ -31,5 +33,8 @@
 
         /// <summary>True if this medication has at least one known drug interaction.</summary>
         public bool HasInteractions { get; set; }
+        public bool SupportsInteractions { get; set; }
+        public bool SupportsIngredientWarnings { get; set; }
+        public string? CustomMedicationWarning { get; set; }
     }
 }

@@ -357,13 +357,14 @@ namespace api_test.Services
 
                 if (!alreadySentToday)
                 {
+                    var medName = UserMedicationFeatureHelper.GetDisplayName(userMed);
                     _context.Alerts.Add(new Alert
                     {
                         UserId = userMed.UserId,
                         UserMedicationId = userMed.Id,
                         Type = "LowStock",
                         Title = "Low Medication Stock",
-                        Message = $"\"{userMed.Medication.Trade_name}\" is running low. " +
+                        Message = $"\"{medName}\" is running low. " +
                                            $"Remaining: {FormatQuantity(userMed.CurrentQuantity)} {userMed.QuantityUnit} " +
                                            $"(threshold: {userMed.LowStockThreshold} {userMed.QuantityUnit}).",
                         IsRead = false,
@@ -467,7 +468,8 @@ namespace api_test.Services
             {
                 var dayMedIds = schedules
                     .Where(s => s.UserMedication != null)
-                    .Select(s => s.UserMedication!.MedId)
+                    .Where(s => UserMedicationFeatureHelper.SupportsInteractions(s.UserMedication))
+                    .Select(s => s.UserMedication!.MedicationId!.Value)
                     .Distinct()
                     .ToList();
 
@@ -501,14 +503,18 @@ namespace api_test.Services
 
                 // medId → translated name (or DB name as fallback)
                 var medIdToName = schedules
-                    .Where(s => s.UserMedication?.Medication != null)
-                    .Select(s => new { s.UserMedication!.MedId, s.UserMedication.Medication.Trade_name })
+                    .Where(s => UserMedicationFeatureHelper.SupportsInteractions(s.UserMedication))
+                    .Select(s => new
+                    {
+                        MedicationId = s.UserMedication!.MedicationId!.Value,
+                        s.UserMedication.Medication!.Trade_name
+                    })
                     .Distinct()
                     .ToDictionary(
-                        x => x.MedId,
+                        x => x.MedicationId,
                         x =>
                         {
-                            var translated = _translation.GetMedName(x.MedId, lang);
+                            var translated = _translation.GetMedName(x.MedicationId, lang);
                             return string.IsNullOrEmpty(translated)
                                 ? (x.Trade_name ?? string.Empty)
                                 : translated;
@@ -556,7 +562,7 @@ namespace api_test.Services
 
                 for (int i = 0; i < schedules.Count; i++)
                 {
-                    var medId = schedules[i].UserMedication?.MedId ?? 0;
+                    var medId = schedules[i].UserMedication?.MedicationId ?? 0;
                     if (medId != 0 && interactionCache.TryGetValue(medId, out var interactions))
                     {
                         baseDtos[i].Interactions = interactions;
@@ -575,18 +581,19 @@ namespace api_test.Services
         // ── ToScheduleDto  ← ترجمة MedName ───────────────────────────────────
         private MedicationScheduleDto ToScheduleDto(MedicationSchedule s, string lang = "en")
         {
-            var dbName = s.UserMedication?.Medication?.Trade_name ?? string.Empty;
-            var medId = s.UserMedication?.MedId ?? 0;
-
-            var translated = medId > 0 ? _translation.GetMedName(medId, lang) : string.Empty;
-            var finalName = string.IsNullOrEmpty(translated) ? dbName : translated;
+            var userMedication = s.UserMedication;
+            var medicationId = userMedication?.MedicationId;
+            var finalName = UserMedicationFeatureHelper.GetDisplayName(userMedication, _translation, lang);
+            var supportsInteractions = UserMedicationFeatureHelper.SupportsInteractions(userMedication);
 
             return new MedicationScheduleDto
             {
                 Id = s.Id,
                 UserMedId = s.UserMedicationId,
-                MedId = medId,
+                MedicationId = medicationId,
                 MedName = finalName,
+                MedicationName = finalName,
+                IsCustomMedication = userMedication?.IsCustomMedication ?? false,
                 ScheduledAt = s.ScheduledAt.ToString("yyyy-MM-ddTHH:mm:ssZ"),
                 NotificationTime = s.NotificationTime.HasValue
                     ? s.NotificationTime.Value.ToString("yyyy-MM-ddTHH:mm:ssZ")
@@ -594,14 +601,13 @@ namespace api_test.Services
                 Status = s.Status ?? string.Empty,
                 ReminderSent = s.ReminderSent,
                 SnoozeCount = s.SnoozeCount,
-                DosageForm = string.IsNullOrWhiteSpace(s.UserMedication?.DosageForm)
-                    ? s.UserMedication?.Medication?.Dosage_Form
-                    : s.UserMedication?.DosageForm,
-                QuantityUnit = string.IsNullOrWhiteSpace(s.UserMedication?.QuantityUnit)
-                    ? MedicationQuantityHelper.GetSuggestedUnit(s.UserMedication?.DosageForm ?? s.UserMedication?.Medication?.Dosage_Form)
-                    : s.UserMedication?.QuantityUnit,
+                DosageForm = UserMedicationFeatureHelper.GetDosageForm(userMedication),
+                QuantityUnit = UserMedicationFeatureHelper.GetQuantityUnit(userMedication),
                 DoseQuantity = MedicationQuantityHelper.ResolveQuantity(s.UserMedication?.DoseQuantity, s.UserMedication?.PillsPerDose),
-                CurrentQuantity = MedicationQuantityHelper.ResolveQuantity(s.UserMedication?.CurrentQuantity, s.UserMedication?.CurrentPillCount)
+                CurrentQuantity = MedicationQuantityHelper.ResolveQuantity(s.UserMedication?.CurrentQuantity, s.UserMedication?.CurrentPillCount),
+                SupportsInteractions = supportsInteractions,
+                SupportsIngredientWarnings = UserMedicationFeatureHelper.SupportsIngredientWarnings(userMedication),
+                CustomMedicationWarning = UserMedicationFeatureHelper.GetCustomMedicationWarning(userMedication)
             };
         }
 

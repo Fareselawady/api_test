@@ -172,9 +172,13 @@ namespace api_test.Controllers
                     UserEmail = a.User.Email,
                     a.UserMedicationId,
                     a.MedicationScheduleId,
-                    MedicationName = a.UserMedication != null && a.UserMedication.Medication != null
-                        ? a.UserMedication.Medication.Trade_name
-                        : null,
+                    MedicationName = a.UserMedication == null
+                        ? null
+                        : a.UserMedication.MedicationName != string.Empty
+                            ? a.UserMedication.MedicationName
+                            : a.UserMedication.Medication != null
+                                ? a.UserMedication.Medication.Trade_name
+                                : null,
                     a.Type,
                     a.Title,
                     a.Message,

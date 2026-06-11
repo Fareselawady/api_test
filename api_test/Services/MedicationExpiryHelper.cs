@@ -16,14 +16,25 @@ namespace api_test.Services
         private static readonly Dictionary<string, (int Value, string Unit)> DosageFormDefaults =
             new(StringComparer.OrdinalIgnoreCase)
             {
-                ["Ophthalmic Solution"] = (28, "days"),
-                ["Oral_Drop"] = (30, "days"),
-                ["Oral Drops"] = (30, "days"),
-                ["Syrup"] = (90, "days"),
-                ["Suspension"] = (14, "days"),
-                ["Oral_Solution"] = (90, "days"),
-                ["Gel"] = (90, "days"),
-                ["Emulgel"] = (90, "days")
+                ["TABLET"] = (30, "days"),
+                ["TAB"] = (30, "days"),
+                ["CAPSULE"] = (30, "days"),
+                ["CAP"] = (30, "days"),
+                ["SYRUP"] = (90, "days"),
+                ["SUSPENSION"] = (14, "days"),
+                ["ORAL_SOLUTION"] = (90, "days"),
+                ["ORAL_DROP"] = (30, "days"),
+                ["ORAL_DROPS"] = (30, "days"),
+                ["EYE_DROP"] = (28, "days"),
+                ["EYE_DROPS"] = (28, "days"),
+                ["OPHTHALMIC_SOLUTION"] = (28, "days"),
+                ["INJECTION"] = (1, "days"),
+                ["AMPOULE"] = (1, "days"),
+                ["CREAM"] = (90, "days"),
+                ["GEL"] = (90, "days"),
+                ["EMULGEL"] = (90, "days"),
+                ["OINTMENT"] = (90, "days"),
+                ["INHALER"] = (30, "days")
             };
 
         public static string? ValidateAfterOpeningInput(
@@ -170,7 +181,15 @@ namespace api_test.Services
             if (string.IsNullOrWhiteSpace(dosageForm))
                 return false;
 
-            return DosageFormDefaults.TryGetValue(dosageForm.Trim(), out value);
+            return DosageFormDefaults.TryGetValue(NormalizeDosageForm(dosageForm), out value);
+        }
+
+        private static string NormalizeDosageForm(string dosageForm)
+        {
+            return dosageForm.Trim()
+                .Replace("-", "_")
+                .Replace(" ", "_")
+                .ToUpperInvariant();
         }
     }
 }

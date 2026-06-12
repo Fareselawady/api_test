@@ -1,4 +1,4 @@
-﻿using api_test.Models;
+using api_test.Models;
 using api_test.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -102,10 +102,15 @@ namespace api_test.Controllers
 
         // ── POST /api/schedules/{scheduleId}/snooze ───────────────────────────
         [HttpPost("api/schedules/{scheduleId:int}/snooze")]
-        public async Task<ActionResult<SnoozeResult>> SnoozeDose(int scheduleId)
+        public async Task<ActionResult<SnoozeResult>> SnoozeDose(int scheduleId, [FromQuery] int minutes = 15)
         {
+            if (minutes <= 0)
+            {
+                return BadRequest(new { message = "Snooze duration must be a positive number of minutes." });
+            }
+
             var userId = GetUserId();
-            var result = await _scheduleService.SnoozeAsync(scheduleId, userId);
+            var result = await _scheduleService.SnoozeAsync(scheduleId, userId, minutes);
 
             if (!result.Succeeded)
                 return result.Error!.Contains("not found")

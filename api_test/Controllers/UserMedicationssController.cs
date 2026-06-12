@@ -1,4 +1,4 @@
-﻿using api_test.Data;
+using api_test.Data;
 using api_test.Entities;
 using api_test.Models;
 using api_test.Services;
@@ -134,6 +134,15 @@ namespace api_test.Controllers
             if (afterOpeningError != null)
                 return BadRequest(new { Message = afterOpeningError });
 
+            if (dto.AdvanceReminderMinutes.HasValue)
+            {
+                var val = dto.AdvanceReminderMinutes.Value;
+                if (val < 0 || val > 1440)
+                {
+                    return BadRequest(new { Message = "Advance reminder minutes must be between 1 and 1440 (or 0 to disable)." });
+                }
+            }
+
             var packageExpiry = dto.ExpiryDate.HasValue
                 ? DateOnly.FromDateTime(dto.ExpiryDate.Value) : (DateOnly?)null;
 
@@ -167,7 +176,8 @@ namespace api_test.Controllers
                 PeriodValue = dto.PeriodValue,
                 FirstDoseTime = dto.FirstDoseTime.HasValue ? TimeOnly.FromTimeSpan(dto.FirstDoseTime.Value) : null,
                 IntervalHours = hasCustomTimes ? null : dto.IntervalHours,
-                NotificationActive = dto.NotificationActive
+                NotificationActive = dto.NotificationActive,
+                AdvanceReminderMinutes = dto.AdvanceReminderMinutes == 0 ? null : dto.AdvanceReminderMinutes
             };
 
             MedicationExpiryHelper.Apply(userMed, medication, now);
@@ -232,7 +242,7 @@ namespace api_test.Controllers
 
             var rawScheduleRows = await _context.MedicationSchedules
                 .Where(s => userMedIds.Contains(s.UserMedicationId)
-                         && s.Status == "Pending"
+                         && s.Status == MedicationStatus.Pending
                          && s.ScheduledAt > nowUtc)
                 .Select(s => new { s.UserMedicationId, s.ScheduledAt })
                 .ToListAsync();
@@ -241,7 +251,9 @@ namespace api_test.Controllers
                 .GroupBy(s => s.UserMedicationId)
                 .ToDictionary(
                     g => g.Key,
-                    g => g.Select(s => s.ScheduledAt.TimeOfDay).Distinct().ToList()
+                    g => g.Select(s => TimeZoneInfo.ConvertTimeFromUtc(s.ScheduledAt, CairoZone).ToString("HH:mm:ss"))
+                          .Distinct()
+                          .ToList()
                 );
 
             var result = new List<UserMedicationDto>();
@@ -287,8 +299,6 @@ namespace api_test.Controllers
                 {
                     doseTimes = times
                         .OrderBy(t => t)
-                        .Select(t => ConvertUtcTimeOfDayToCairoString(t))
-                        .Distinct()
                         .ToList();
                 }
                 else
@@ -334,6 +344,7 @@ namespace api_test.Controllers
                     FirstDoseTime = um.FirstDoseTime?.ToTimeSpan(),
                     IntervalHours = um.IntervalHours,
                     NotificationActive = um.NotificationActive,
+                    AdvanceReminderMinutes = um.AdvanceReminderMinutes,
                     ScheduleType = scheduleType,
                     DoseTimes = doseTimes,
                     Interactions = interactions
@@ -457,7 +468,20 @@ namespace api_test.Controllers
             if (dto.CurrentPillCount.HasValue) userMed.CurrentPillCount = dto.CurrentPillCount;
             if (dto.InitialPillCount.HasValue) userMed.InitialPillCount = dto.InitialPillCount;
             if (dto.LowStockThreshold.HasValue) userMed.LowStockThreshold = dto.LowStockThreshold;
+            if (dto.AdvanceReminderMinutes.HasValue)
+            {
+                var val = dto.AdvanceReminderMinutes.Value;
+                if (val < 0 || val > 1440)
+                {
+                    return BadRequest(new { Message = "Advance reminder minutes must be between 1 and 1440 (or 0 to disable)." });
+                }
+            }
+
             if (dto.NotificationActive.HasValue) userMed.NotificationActive = dto.NotificationActive.Value;
+            if (dto.AdvanceReminderMinutes.HasValue)
+            {
+                userMed.AdvanceReminderMinutes = dto.AdvanceReminderMinutes.Value == 0 ? null : dto.AdvanceReminderMinutes;
+            }
             if (dto.IsOpened.HasValue) userMed.IsOpened = dto.IsOpened.Value;
             if (dto.OpenedDate.HasValue) userMed.OpenedDate = dto.OpenedDate.Value.Date;
             if (dto.AfterOpeningDurationValue.HasValue)
@@ -875,6 +899,15 @@ namespace api_test.Controllers
             if (effectiveScheduleType == "CustomTimes" && dto.IntervalHours.HasValue)
                 return BadRequest(new { Message = "intervalHours must not be used together with doseTimes." });
 
+            if (dto.AdvanceReminderMinutes.HasValue)
+            {
+                var val = dto.AdvanceReminderMinutes.Value;
+                if (val < 0 || val > 1440)
+                {
+                    return BadRequest(new { Message = "Advance reminder minutes must be between 1 and 1440 (or 0 to disable)." });
+                }
+            }
+
             var packageExpiry = dto.ExpiryDate.HasValue
                 ? DateOnly.FromDateTime(dto.ExpiryDate.Value) : (DateOnly?)null;
 
@@ -891,6 +924,7 @@ namespace api_test.Controllers
             userMed.InitialPillCount = dto.InitialPillCount;
             userMed.LowStockThreshold = dto.LowStockThreshold;
             userMed.NotificationActive = dto.NotificationActive;
+            userMed.AdvanceReminderMinutes = dto.AdvanceReminderMinutes == 0 ? null : dto.AdvanceReminderMinutes;
 
             // PillsPerDose: save provided value (null means clear/unset for the details endpoint
             // which is a full-replace style endpoint like the original fields above)

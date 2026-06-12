@@ -210,6 +210,14 @@
 
     "MissedDose": "جرعة فائتة",
     "MissedDoseMessage": "لقد فاتتك جرعة \"{0}\". يرجى مراجعة جدولك.",
+    "TakenConfirmation": "تم تناول الجرعة",
+    "TakenConfirmationMessage": "تم تسجيل جرعة \"{0}\" في {1}.",
+    "SkippedConfirmation": "تم تخطي الجرعة",
+    "SkippedConfirmationMessage": "تم تسجيل تخطي جرعة \"{0}\" بنجاح.",
+    "AdvanceReminder": "تذكير مسبق بالجرعة",
+    "AdvanceDoseReminderMessage": "تذكير: جرعتك من \"{0}\" مقررة خلال {1} دقيقة.",
+    "DoseReminderDueNow": "حان وقت الجرعة",
+    "SnoozeReminderMessage": "تذكير مؤجل: حان وقت جرعتك من \"{0}\".",
 
     "ExpiryWarningToday": "الدواء ينتهي اليوم!",
     "ExpiryWarningSoon": "دواء على وشك الانتهاء",

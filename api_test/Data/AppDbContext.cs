@@ -1,4 +1,4 @@
-﻿using api_test.Entities;
+using api_test.Entities;
 using api_test.Models;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
@@ -72,6 +72,7 @@ namespace api_test.Data
             {
                 entity.Property(e => e.UserMedicationId).HasColumnName("UserMedId");
                 entity.Property(e => e.NotificationTime).IsRequired(false);
+                entity.Property(e => e.Status).HasConversion<string>();
             });
 
             modelBuilder.Entity<MedIngredientLink>()

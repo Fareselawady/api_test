@@ -1,4 +1,4 @@
-﻿namespace api_test.Models
+namespace api_test.Models
 {
     public class SkipDoseResult
     {
@@ -14,9 +14,9 @@
             {
                 Succeeded = true,
                 ScheduleId = scheduleId,
-                Status = "Missed",
+                Status = "Skipped",
                 PillsDeducted = 0,
-                Message = "Dose marked as missed."
+                Message = "Dose marked as skipped."
             };
 
         public static SkipDoseResult NotFound() =>
@@ -24,6 +24,9 @@
 
         public static SkipDoseResult AlreadyTaken() =>
             new SkipDoseResult { Succeeded = false, Error = "Cannot skip a dose that is already taken." };
+
+        public static SkipDoseResult AlreadySkipped() =>
+            new SkipDoseResult { Succeeded = false, Error = "Dose is already skipped." };
 
         public static SkipDoseResult AlreadyMissed() =>
             new SkipDoseResult { Succeeded = false, Error = "Dose is already missed." };

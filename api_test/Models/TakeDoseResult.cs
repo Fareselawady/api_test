@@ -1,4 +1,4 @@
-﻿namespace api_test.Models
+namespace api_test.Models
 {
     public class TakeDoseResult
     {
@@ -37,5 +37,11 @@
 
         public static TakeDoseResult AlreadyTaken() =>
             new TakeDoseResult { Succeeded = false, Error = "This dose has already been marked as taken." };
+
+        public static TakeDoseResult AlreadySkipped() =>
+            new TakeDoseResult { Succeeded = false, Error = "Cannot take a dose that is already skipped." };
+
+        public static TakeDoseResult Failure(string error) =>
+            new TakeDoseResult { Succeeded = false, Error = error };
     }
 }

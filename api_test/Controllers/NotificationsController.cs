@@ -1,9 +1,11 @@
-﻿using api_test.Data;
+using api_test.Data;
+using api_test.Entities;
 using api_test.Models;
 using api_test.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using System.Linq;
 using System.Security.Claims;
 
 namespace api_test.Controllers
@@ -45,7 +47,7 @@ namespace api_test.Controllers
                     .ThenInclude(um => um.Medication)
                 .Where(s =>
                     s.UserMedication!.UserId == userId &&
-                    s.Status == "Pending" &&
+                    s.Status == MedicationStatus.Pending &&
                     s.ScheduledAt > nowUtc)
                 .OrderBy(s => s.ScheduledAt)
                 .ToListAsync();
@@ -63,21 +65,49 @@ namespace api_test.Controllers
             {
                 var interactions = await _interactionService
                     .GetInteractionsForUserMedication(userId, medicationId);
-                interactionMap[medicationId] = interactions.Count > 0;
+                interactionMap[medicationId] = interactions.Any();
             }
 
             var result = schedules.Select(s =>
             {
                 var um = s.UserMedication!;
-
-                // Reuse stored NotificationTime if correct; otherwise calculate dynamically
-                DateTime notifTime = (s.NotificationTime.HasValue &&
-                    s.NotificationTime.Value == s.ScheduledAt.AddMinutes(-15))
-                    ? s.NotificationTime.Value
-                    : s.ScheduledAt.AddMinutes(-15);
-
                 var medName = UserMedicationFeatureHelper.GetDisplayName(um, _translation, lang);
                 var supportsInteractions = UserMedicationFeatureHelper.SupportsInteractions(um);
+
+                string title;
+                string message;
+                DateTime notifTime;
+
+                if (um.AdvanceReminderMinutes.HasValue && um.AdvanceReminderMinutes.Value > 0)
+                {
+                    var mins = um.AdvanceReminderMinutes.Value;
+                    notifTime = s.ScheduledAt.AddMinutes(-mins);
+                    title = _translation.GetNotificationText(
+                        "AdvanceReminder",
+                        lang,
+                        "Advance Reminder");
+                    message = _translation.GetNotificationText(
+                        "AdvanceDoseReminderMessage",
+                        lang,
+                        $"Reminder: your dose of \"{medName}\" is due in {mins} minute(s) - {um.Dosage}",
+                        medName,
+                        mins.ToString(),
+                        um.Dosage ?? string.Empty);
+                }
+                else
+                {
+                    notifTime = s.ScheduledAt;
+                    title = _translation.GetNotificationText(
+                        "DoseReminderDueNow",
+                        lang,
+                        "Dose Reminder Due Now");
+                    message = _translation.GetNotificationText(
+                        "DoseReminderDueNowMessage",
+                        lang,
+                        $"It's time to take your dose of \"{medName}\" - {um.Dosage}",
+                        medName,
+                        um.Dosage ?? string.Empty);
+                }
 
                 return new NotificationScheduleDto
                 {
@@ -87,20 +117,11 @@ namespace api_test.Controllers
                     MedName = medName,
                     MedicationName = medName,
                     IsCustomMedication = um.IsCustomMedication,
-                    Title = _translation.GetNotificationText(
-                        "DoseReminder",
-                        lang,
-                        "Dose Reminder"),
-                    Message = _translation.GetNotificationText(
-                        "DoseReminderDueSoonMessage",
-                        lang,
-                        $"Reminder: your dose of \"{medName}\" is due in 15 minute(s) - {um.Dosage}",
-                        medName,
-                        "15",
-                        um.Dosage ?? string.Empty),
+                    Title = title,
+                    Message = message,
                     ScheduledAt = s.ScheduledAt,
                     NotificationTime = notifTime,
-                    Status = s.Status ?? "Pending",
+                    Status = s.Status.ToString(),
                     PillsPerDose = um.PillsPerDose,
                     CurrentPillCount = um.CurrentPillCount,
                     LowStockThreshold = um.LowStockThreshold,

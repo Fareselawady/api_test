@@ -1,4 +1,4 @@
-﻿namespace api_test.Entities
+namespace api_test.Entities
 {
     public class UserMedication
     {
@@ -51,6 +51,7 @@
         public int? IntervalHours { get; set; }
 
         public bool NotificationActive { get; set; } = true;
+        public int? AdvanceReminderMinutes { get; set; }
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
         public ICollection<MedicationSchedule> MedicationSchedules { get; set; } = new List<MedicationSchedule>();

@@ -1,4 +1,4 @@
-﻿namespace api_test.Models
+namespace api_test.Models
 {
     // ── Schedule response DTO ─────────────────────────────────────────────────
     public class MedicationScheduleDto
@@ -13,7 +13,14 @@
         public string NotificationTime { get; set; } = string.Empty;
         public string Status { get; set; } = string.Empty;
         public bool ReminderSent { get; set; }
+        public bool AdvanceReminderSent { get; set; }
+        public bool DueReminderSent { get; set; }
+        public string SnoozedUntil { get; set; } = string.Empty;
         public int SnoozeCount { get; set; }
+        public int? AdvanceReminderMinutes { get; set; }
+        public string TakenAt { get; set; } = string.Empty;
+        public string SkippedAt { get; set; } = string.Empty;
+        public string MissedAt { get; set; } = string.Empty;
         public decimal? DoseQuantity { get; set; }
         public decimal? CurrentQuantity { get; set; }
         public string? QuantityUnit { get; set; }

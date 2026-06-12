@@ -134,8 +134,14 @@ namespace api_test.Services
             var fallback = alert.Title ?? alert.Type ?? string.Empty;
             var type = alert.Type ?? string.Empty;
 
-            if (type == "DoseReminder")
+            if (type == "DoseReminder" || type == "SnoozeReminder")
             {
+                if (alert.Title?.Contains("advance", StringComparison.OrdinalIgnoreCase) == true)
+                    return _translation.GetNotificationText("AdvanceReminder", lang, fallback);
+
+                if (alert.Title?.Contains("due now", StringComparison.OrdinalIgnoreCase) == true)
+                    return _translation.GetNotificationText("DoseReminderDueNow", lang, fallback);
+
                 var retry = MatchCount(alert.Title, "retry");
                 if (retry is not null)
                     return _translation.GetNotificationText(
@@ -184,7 +190,22 @@ namespace api_test.Services
 
             switch (type)
             {
+                case "SnoozeReminder":
+                    return _translation.GetNotificationText(
+                        "SnoozeReminderMessage", lang, fallback, medName);
                 case "DoseReminder":
+                    if (alert.Title?.Contains("advance", StringComparison.OrdinalIgnoreCase) == true)
+                    {
+                        var dueSoonMatch = Regex.Match(fallback, @"due in (?<minutes>\d+) minute", RegexOptions.IgnoreCase);
+                        var mins = dueSoonMatch.Success ? dueSoonMatch.Groups["minutes"].Value : "15";
+                        return _translation.GetNotificationText(
+                            "AdvanceDoseReminderMessage", lang, fallback, medName, mins);
+                    }
+
+                    if (alert.Title?.Contains("snooze", StringComparison.OrdinalIgnoreCase) == true)
+                        return _translation.GetNotificationText(
+                            "SnoozeReminderMessage", lang, fallback, medName);
+
                     var dueSoon = Regex.Match(
                         fallback,
                         @"due in (?<minutes>\d+) minute",
@@ -203,16 +224,22 @@ namespace api_test.Services
                         return _translation.GetNotificationText(
                             "DoseReminderDueNowMessage", lang, fallback, medName, dosage);
 
-                    if (alert.Title?.Contains("snooze", StringComparison.OrdinalIgnoreCase) == true)
-                        return _translation.GetNotificationText(
-                            "DoseReminderSnoozeMessage", lang, fallback, medName, dosage);
-
                     if (alert.Title?.Contains("retry", StringComparison.OrdinalIgnoreCase) == true)
                         return _translation.GetNotificationText(
                             "DoseReminderRetryMessage", lang, fallback, medName, dosage);
 
                     return _translation.GetNotificationText(
                         "DoseReminderMessage", lang, fallback, medName, dosage);
+
+                case "TakenConfirmation":
+                    var timeMatch = Regex.Match(fallback, @"taken at (?<time>.+)$", RegexOptions.IgnoreCase);
+                    var timeStr = timeMatch.Success ? timeMatch.Groups["time"].Value.TrimEnd('.') : string.Empty;
+                    return _translation.GetNotificationText(
+                        "TakenConfirmationMessage", lang, fallback, medName, timeStr);
+
+                case "SkippedConfirmation":
+                    return _translation.GetNotificationText(
+                        "SkippedConfirmationMessage", lang, fallback, medName);
 
                 case "MissedDose":
                     return _translation.GetNotificationText(

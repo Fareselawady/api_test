@@ -1,4 +1,4 @@
-﻿namespace api_test.Models
+namespace api_test.Models
 {
     public class CreateUserMedicationDto
     {
@@ -40,6 +40,7 @@
         public int? PeriodValue { get; set; }
         public int? IntervalHours { get; set; }
         public bool NotificationActive { get; set; } = true;
+        public int? AdvanceReminderMinutes { get; set; }
 
         // ── Schedule ───────────────────────────────────────────────────────────
         /// <summary>

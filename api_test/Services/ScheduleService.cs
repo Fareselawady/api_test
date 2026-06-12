@@ -1,4 +1,4 @@
-﻿using api_test.Data;
+using api_test.Data;
 using api_test.Entities;
 using api_test.Models;
 using Microsoft.EntityFrameworkCore;
@@ -37,7 +37,7 @@ namespace api_test.Services
             var futurePending = await _context.MedicationSchedules
                 .Where(s => s.UserMedicationId == userMed.Id
                          && s.ScheduledAt > nowUtc
-                         && s.Status == "Pending")
+                         && s.Status == MedicationStatus.Pending)
                 .ToListAsync();
 
             if (futurePending.Any())
@@ -56,7 +56,7 @@ namespace api_test.Services
             var futurePending = await _context.MedicationSchedules
                 .Where(s => s.UserMedicationId == userMed.Id
                          && s.ScheduledAt > nowUtc
-                         && s.Status == "Pending")
+                         && s.Status == MedicationStatus.Pending)
                 .ToListAsync();
 
             if (futurePending.Any())
@@ -82,11 +82,13 @@ namespace api_test.Services
             var schedules = new List<MedicationSchedule>();
 
             DateTime localStart = userMed.StartDate.Value.ToDateTime(userMed.FirstDoseTime.Value);
-            DateTime start = TimeZoneInfo.ConvertTimeToUtc(localStart, CairoZone);
-            start = DateTime.SpecifyKind(start, DateTimeKind.Utc);
+            DateTime start = SafeConvertTimeToUtc(localStart, CairoZone);
 
             if (fromNow && start < DateTime.UtcNow)
-                start = DateTime.UtcNow;
+            {
+                var utcNow = DateTime.UtcNow;
+                start = new DateTime(utcNow.Year, utcNow.Month, utcNow.Day, utcNow.Hour, utcNow.Minute, 0, DateTimeKind.Utc);
+            }
 
             DateTime end = userMed.EndDate.HasValue
                 ? userMed.EndDate.Value.ToDateTime(TimeOnly.MinValue).AddDays(1)
@@ -99,7 +101,7 @@ namespace api_test.Services
                 var current = start;
                 while (current < end)
                 {
-                    schedules.Add(BuildEntry(userMed.Id, current));
+                    schedules.Add(BuildEntry(userMed, current));
                     current = current.AddHours(userMed.IntervalHours.Value);
                 }
             }
@@ -117,14 +119,14 @@ namespace api_test.Services
                     {
                         var doseTime = current.AddHours(intervalBetweenDoses * i);
                         if (doseTime >= end) break;
-                        schedules.Add(BuildEntry(userMed.Id, doseTime));
+                        schedules.Add(BuildEntry(userMed, doseTime));
                     }
                     current = current.AddHours(periodHours);
                 }
             }
             else
             {
-                schedules.Add(BuildEntry(userMed.Id, start));
+                schedules.Add(BuildEntry(userMed, start));
             }
 
             await _context.MedicationSchedules.AddRangeAsync(schedules);
@@ -150,7 +152,7 @@ namespace api_test.Services
             {
                 var existing = await _context.MedicationSchedules
                     .Where(s => s.UserMedicationId == userMed.Id
-                             && (s.Status == "Taken" || s.Status == "Missed"))
+                             && (s.Status == MedicationStatus.Taken || s.Status == MedicationStatus.Missed))
                     .Select(s => s.ScheduledAt)
                     .ToListAsync();
                 handledSlots = existing.ToHashSet();
@@ -161,13 +163,12 @@ namespace api_test.Services
                 foreach (var time in doseTimes)
                 {
                     DateTime localDt = date.ToDateTime(time);
-                    DateTime utcDt = TimeZoneInfo.ConvertTimeToUtc(localDt, CairoZone);
-                    utcDt = DateTime.SpecifyKind(utcDt, DateTimeKind.Utc);
+                    DateTime utcDt = SafeConvertTimeToUtc(localDt, CairoZone);
 
                     if (fromNow && utcDt <= nowUtc) continue;
                     if (handledSlots.Contains(utcDt)) continue;
 
-                    schedules.Add(BuildEntry(userMed.Id, utcDt));
+                    schedules.Add(BuildEntry(userMed, utcDt));
                 }
             }
 
@@ -226,7 +227,7 @@ namespace api_test.Services
             int userId, string lang = "en")
         {
             var cairoNow = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, CairoZone);
-            var todayStart = TimeZoneInfo.ConvertTimeToUtc(cairoNow.Date, CairoZone);
+            var todayStart = SafeConvertTimeToUtc(cairoNow.Date, CairoZone);
             var todayEnd = todayStart.AddDays(1);
 
             var schedules = await _context.MedicationSchedules
@@ -245,7 +246,7 @@ namespace api_test.Services
             int userId, DateOnly date, string lang = "en")
         {
             var localMidnight = date.ToDateTime(TimeOnly.MinValue);
-            var utcStart = TimeZoneInfo.ConvertTimeToUtc(localMidnight, CairoZone);
+            var utcStart = SafeConvertTimeToUtc(localMidnight, CairoZone);
             var utcEnd = utcStart.AddDays(1);
 
             var schedules = await _context.MedicationSchedules
@@ -267,10 +268,12 @@ namespace api_test.Services
         public async Task<bool> UpdateScheduleStatusAsync(
             int scheduleId, string newStatus, int requestingUserId)
         {
-            var valid = new[] { "Pending", "Missed" };
-            if (!valid.Contains(newStatus))
+            if (!Enum.TryParse<MedicationStatus>(newStatus, out var enumStatus) ||
+                (enumStatus != MedicationStatus.Pending && enumStatus != MedicationStatus.Missed))
+            {
                 throw new ArgumentException(
                     $"Invalid status '{newStatus}'. Use TakeDoseAsync for Taken.");
+            }
 
             var schedule = await _context.MedicationSchedules
                 .Include(s => s.UserMedication)
@@ -279,11 +282,35 @@ namespace api_test.Services
 
             if (schedule is null) return false;
 
-            if (schedule.Status == "Taken")
+            if (schedule.Status == MedicationStatus.Taken)
                 throw new InvalidOperationException(
                     $"Schedule {scheduleId} is already Taken and cannot be changed.");
 
-            schedule.Status = newStatus;
+            var now = DateTime.UtcNow;
+            if (enumStatus == MedicationStatus.Missed && schedule.Status != MedicationStatus.Missed)
+            {
+                schedule.MissedAt = now;
+                schedule.SnoozedUntil = null;
+
+                if (schedule.UserMedication!.NotificationActive)
+                {
+                    var medName = UserMedicationFeatureHelper.GetDisplayName(schedule.UserMedication);
+                    _context.Alerts.Add(new Alert
+                    {
+                        UserId = schedule.UserMedication!.UserId,
+                        UserMedicationId = schedule.UserMedicationId,
+                        MedicationScheduleId = schedule.Id,
+                        Type = "MissedDose",
+                        Title = "Missed Dose",
+                        Message = $"Dose of \"{medName}\" was missed.",
+                        IsRead = false,
+                        ScheduledAt = now,
+                        CreatedAt = now
+                    });
+                }
+            }
+
+            schedule.Status = enumStatus;
             await _context.SaveChangesAsync();
             return true;
         }
@@ -301,14 +328,35 @@ namespace api_test.Services
                                        && s.UserMedication!.UserId == requestingUserId);
 
             if (schedule is null) return TakeDoseResult.NotFound();
-            if (schedule.Status == "Taken") return TakeDoseResult.AlreadyTaken();
+            if (schedule.Status == MedicationStatus.Taken) return TakeDoseResult.AlreadyTaken();
+            if (schedule.Status == MedicationStatus.Skipped) return TakeDoseResult.AlreadySkipped();
 
             var userMed = schedule.UserMedication;
             var now = DateTime.UtcNow;
 
-            schedule.Status = "Taken";
+            schedule.Status = MedicationStatus.Taken;
             schedule.TakenAt = now;
             schedule.SnoozedUntil = null;
+
+            var cairoTime = TimeZoneInfo.ConvertTimeFromUtc(now, CairoZone);
+            var timeString = cairoTime.ToString("hh:mm tt", System.Globalization.CultureInfo.InvariantCulture);
+            var medDisplayName = UserMedicationFeatureHelper.GetDisplayName(userMed);
+
+            if (userMed.NotificationActive)
+            {
+                _context.Alerts.Add(new Alert
+                {
+                    UserId = userMed.UserId,
+                    UserMedicationId = userMed.Id,
+                    MedicationScheduleId = schedule.Id,
+                    Type = "TakenConfirmation",
+                    Title = "Taken Confirmation",
+                    Message = $"Dose of \"{medDisplayName}\" taken at {timeString}.",
+                    IsRead = false,
+                    ScheduledAt = now,
+                    CreatedAt = now
+                });
+            }
 
             var relatedAlerts = await _context.Alerts
                 .Where(a => a.MedicationScheduleId == scheduleId && !a.IsRead)
@@ -355,7 +403,7 @@ namespace api_test.Services
                     a.Type == "LowStock" &&
                     a.CreatedAt.Date == now.Date);
 
-                if (!alreadySentToday)
+                if (!alreadySentToday && userMed.NotificationActive)
                 {
                     var medName = UserMedicationFeatureHelper.GetDisplayName(userMed);
                     _context.Alerts.Add(new Alert
@@ -389,10 +437,10 @@ namespace api_test.Services
         }
 
         // =====================================================================
-        // SNOOZE  (unchanged)
+        // SNOOZE
         // =====================================================================
 
-        public async Task<SnoozeResult> SnoozeAsync(int scheduleId, int requestingUserId)
+        public async Task<SnoozeResult> SnoozeAsync(int scheduleId, int requestingUserId, int minutes = 15)
         {
             var schedule = await _context.MedicationSchedules
                 .Include(s => s.UserMedication)
@@ -400,9 +448,10 @@ namespace api_test.Services
                                        && s.UserMedication!.UserId == requestingUserId);
 
             if (schedule is null) return SnoozeResult.NotFound();
-            if (schedule.Status == "Taken") return SnoozeResult.AlreadyTaken();
-            if (schedule.Status == "Missed") return SnoozeResult.AlreadyMissed();
-            if (schedule.Status != "Pending") return SnoozeResult.InvalidStatus(schedule.Status ?? "Unknown");
+            if (schedule.Status == MedicationStatus.Taken) return SnoozeResult.AlreadyTaken();
+            if (schedule.Status == MedicationStatus.Missed) return SnoozeResult.AlreadyMissed();
+            if (schedule.Status != MedicationStatus.Pending && schedule.Status != MedicationStatus.Snoozed)
+                return SnoozeResult.InvalidStatus(schedule.Status.ToString());
 
             int currentSnoozeCount = schedule.SnoozeCount;
             if (currentSnoozeCount >= MaxSnoozeCount)
@@ -410,11 +459,15 @@ namespace api_test.Services
 
             DateTime oldScheduledAt = schedule.ScheduledAt;
             DateTime oldNotificationTime = schedule.NotificationTime ?? schedule.ScheduledAt.AddMinutes(-15);
+            var now = DateTime.UtcNow;
 
-            schedule.ScheduledAt = oldScheduledAt.AddHours(1);
-            schedule.NotificationTime = oldNotificationTime.AddHours(1);
+            var snoozeTime = now.AddMinutes(minutes);
+            schedule.SnoozedUntil = new DateTime(snoozeTime.Year, snoozeTime.Month, snoozeTime.Day, snoozeTime.Hour, snoozeTime.Minute, 0, DateTimeKind.Utc);
+            schedule.Status = MedicationStatus.Snoozed;
             schedule.SnoozeCount = currentSnoozeCount + 1;
             schedule.ReminderSent = false;
+            schedule.AdvanceReminderSent = false;
+            schedule.DueReminderSent = false;
 
             await _context.SaveChangesAsync();
 
@@ -422,14 +475,15 @@ namespace api_test.Services
                 scheduleId: scheduleId,
                 snoozeCount: schedule.SnoozeCount,
                 oldScheduledAt: oldScheduledAt,
-                newScheduledAt: schedule.ScheduledAt,
+                newScheduledAt: oldScheduledAt,
                 oldNotificationTime: oldNotificationTime,
-                newNotificationTime: schedule.NotificationTime.Value
+                newNotificationTime: schedule.SnoozedUntil.Value,
+                minutes: minutes
             );
         }
 
         // =====================================================================
-        // SKIP  (unchanged)
+        // SKIP
         // =====================================================================
 
         public async Task<SkipDoseResult> SkipDoseAsync(int scheduleId, int requestingUserId)
@@ -440,12 +494,34 @@ namespace api_test.Services
                                        && s.UserMedication!.UserId == requestingUserId);
 
             if (schedule is null) return SkipDoseResult.NotFound();
-            if (schedule.Status == "Taken") return SkipDoseResult.AlreadyTaken();
-            if (schedule.Status == "Missed") return SkipDoseResult.AlreadyMissed();
-            if (schedule.Status != "Pending") return SkipDoseResult.InvalidStatus(schedule.Status ?? "Unknown");
+            if (schedule.Status == MedicationStatus.Taken) return SkipDoseResult.AlreadyTaken();
+            if (schedule.Status == MedicationStatus.Missed) return SkipDoseResult.AlreadyMissed();
+            if (schedule.Status == MedicationStatus.Skipped) return SkipDoseResult.AlreadySkipped();
+            if (schedule.Status != MedicationStatus.Pending && schedule.Status != MedicationStatus.Snoozed)
+                return SkipDoseResult.InvalidStatus(schedule.Status.ToString());
 
-            schedule.Status = "Missed";
+            var now = DateTime.UtcNow;
+            schedule.Status = MedicationStatus.Skipped;
+            schedule.SkippedAt = now;
+            schedule.SnoozedUntil = null;
             schedule.ReminderSent = true;
+
+            if (schedule.UserMedication!.NotificationActive)
+            {
+                var medName = UserMedicationFeatureHelper.GetDisplayName(schedule.UserMedication);
+                _context.Alerts.Add(new Alert
+                {
+                    UserId = schedule.UserMedication!.UserId,
+                    UserMedicationId = schedule.UserMedicationId,
+                    MedicationScheduleId = schedule.Id,
+                    Type = "SkippedConfirmation",
+                    Title = "Skipped Confirmation",
+                    Message = $"Dose of \"{medName}\" skipped.",
+                    IsRead = false,
+                    ScheduledAt = now,
+                    CreatedAt = now
+                });
+            }
 
             await _context.SaveChangesAsync();
             return SkipDoseResult.Success(scheduleId);
@@ -598,9 +674,24 @@ namespace api_test.Services
                 NotificationTime = s.NotificationTime.HasValue
                     ? s.NotificationTime.Value.ToString("yyyy-MM-ddTHH:mm:ssZ")
                     : string.Empty,
-                Status = s.Status ?? string.Empty,
+                Status = s.Status.ToString(),
                 ReminderSent = s.ReminderSent,
+                AdvanceReminderSent = s.AdvanceReminderSent,
+                DueReminderSent = s.DueReminderSent,
+                SnoozedUntil = s.SnoozedUntil.HasValue
+                    ? s.SnoozedUntil.Value.ToString("yyyy-MM-ddTHH:mm:ssZ")
+                    : string.Empty,
                 SnoozeCount = s.SnoozeCount,
+                AdvanceReminderMinutes = userMedication?.AdvanceReminderMinutes,
+                TakenAt = s.TakenAt.HasValue
+                    ? s.TakenAt.Value.ToString("yyyy-MM-ddTHH:mm:ssZ")
+                    : string.Empty,
+                SkippedAt = s.SkippedAt.HasValue
+                    ? s.SkippedAt.Value.ToString("yyyy-MM-ddTHH:mm:ssZ")
+                    : string.Empty,
+                MissedAt = s.MissedAt.HasValue
+                    ? s.MissedAt.Value.ToString("yyyy-MM-ddTHH:mm:ssZ")
+                    : string.Empty,
                 DosageForm = UserMedicationFeatureHelper.GetDosageForm(userMedication),
                 QuantityUnit = UserMedicationFeatureHelper.GetQuantityUnit(userMedication),
                 DoseQuantity = MedicationQuantityHelper.ResolveQuantity(s.UserMedication?.DoseQuantity, s.UserMedication?.PillsPerDose),
@@ -611,17 +702,22 @@ namespace api_test.Services
             };
         }
 
-        private static MedicationSchedule BuildEntry(int userMedId, DateTime scheduledAt)
-            => new MedicationSchedule
+        private static MedicationSchedule BuildEntry(UserMedication userMed, DateTime scheduledAt)
+        {
+            var offset = userMed.AdvanceReminderMinutes ?? 0;
+            return new MedicationSchedule
             {
-                UserMedicationId = userMedId,
+                UserMedicationId = userMed.Id,
                 ScheduledAt = scheduledAt,
-                NotificationTime = scheduledAt.AddMinutes(-15),
-                Status = "Pending",
+                NotificationTime = scheduledAt.AddMinutes(-offset),
+                Status = MedicationStatus.Pending,
                 ReminderSent = false,
+                AdvanceReminderSent = false,
+                DueReminderSent = false,
                 SnoozeCount = 0,
                 CreatedAt = DateTime.UtcNow
             };
+        }
 
         private static string FormatQuantity(decimal? quantity)
             => quantity.HasValue
@@ -637,5 +733,21 @@ namespace api_test.Services
                 "month" or "months" => periodValue * 24.0 * 30,
                 _ => periodValue * 24.0
             };
+
+        private static DateTime SafeConvertTimeToUtc(DateTime localDt, TimeZoneInfo zone)
+        {
+            if (localDt.Kind != DateTimeKind.Unspecified)
+            {
+                localDt = DateTime.SpecifyKind(localDt, DateTimeKind.Unspecified);
+            }
+
+            if (zone.IsInvalidTime(localDt))
+            {
+                localDt = localDt.AddHours(1);
+            }
+
+            DateTime utcDt = TimeZoneInfo.ConvertTimeToUtc(localDt, zone);
+            return DateTime.SpecifyKind(utcDt, DateTimeKind.Utc);
+        }
     }
 }

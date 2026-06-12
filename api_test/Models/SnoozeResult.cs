@@ -1,4 +1,4 @@
-﻿namespace api_test.Models
+namespace api_test.Models
 {
     public class SnoozeResult
     {
@@ -22,12 +22,13 @@
             DateTime oldScheduledAt,
             DateTime newScheduledAt,
             DateTime oldNotificationTime,
-            DateTime newNotificationTime) =>
+            DateTime newNotificationTime,
+            int minutes) =>
             new SnoozeResult
             {
                 Succeeded = true,
                 ScheduleId = scheduleId,
-                Status = "Pending",
+                Status = "Snoozed",
                 SnoozeCount = snoozeCount,
                 SnoozeLimitReached = snoozeCount >= MaxSnoozeCount,
                 OldScheduledAt = oldScheduledAt,
@@ -35,8 +36,8 @@
                 OldNotificationTime = oldNotificationTime,
                 NewNotificationTime = newNotificationTime,
                 Message = snoozeCount >= MaxSnoozeCount
-                    ? "Dose snoozed for 1 hour. Snooze limit reached."
-                    : "Dose snoozed for 1 hour."
+                    ? $"Dose snoozed for {minutes} minutes. Snooze limit reached."
+                    : $"Dose snoozed for {minutes} minutes."
             };
 
         public static SnoozeResult LimitReached(int scheduleId, int snoozeCount) =>
@@ -45,7 +46,7 @@
                 Succeeded = false,
                 Error = "Maximum snooze count reached.",
                 ScheduleId = scheduleId,
-                Status = "Pending",
+                Status = "Snoozed",
                 SnoozeCount = snoozeCount,
                 SnoozeLimitReached = true
             };

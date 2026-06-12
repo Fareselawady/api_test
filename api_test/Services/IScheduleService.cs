@@ -1,4 +1,4 @@
-﻿using api_test.Entities;
+using api_test.Entities;
 using api_test.Models;
 namespace api_test.Services
 {
@@ -19,7 +19,7 @@ namespace api_test.Services
         Task<TakeDoseResult> TakeDoseAsync(int scheduleId, int requestingUserId);
 
         // ── Snooze ────────────────────────────────────────────────────────────
-        Task<SnoozeResult> SnoozeAsync(int scheduleId, int requestingUserId);
+        Task<SnoozeResult> SnoozeAsync(int scheduleId, int requestingUserId, int minutes = 15);
 
         // ── Skip ──────────────────────────────────────────────────────────────
         Task<SkipDoseResult> SkipDoseAsync(int scheduleId, int requestingUserId);

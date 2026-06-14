@@ -41,15 +41,15 @@ namespace api_test.Controllers
             var userId = GetUserId();
             var nowUtc = DateTime.UtcNow;
 
-            // Load all future pending schedules for this user
+            // Load all future pending or snoozed schedules for this user
             var schedules = await _db.MedicationSchedules
                 .Include(s => s.UserMedication)
                     .ThenInclude(um => um.Medication)
                 .Where(s =>
                     s.UserMedication!.UserId == userId &&
-                    s.Status == MedicationStatus.Pending &&
-                    s.ScheduledAt > nowUtc)
-                .OrderBy(s => s.ScheduledAt)
+                    (s.Status == MedicationStatus.Pending || s.Status == MedicationStatus.Snoozed) &&
+                    (s.Status == MedicationStatus.Snoozed ? s.SnoozedUntil : s.ScheduledAt) > nowUtc)
+                .OrderBy(s => s.Status == MedicationStatus.Snoozed ? s.SnoozedUntil : s.ScheduledAt)
                 .ToListAsync();
 
             // Build a map of medicationId → hasInteractions to avoid N+1 per schedule.
@@ -78,7 +78,23 @@ namespace api_test.Controllers
                 string message;
                 DateTime notifTime;
 
-                if (um.AdvanceReminderMinutes.HasValue && um.AdvanceReminderMinutes.Value > 0)
+                if (s.Status == MedicationStatus.Snoozed)
+                {
+                    notifTime = s.SnoozedUntil ?? s.ScheduledAt;
+                    title = _translation.GetNotificationText(
+                        "DoseReminderSnooze",
+                        lang,
+                        $"Dose Reminder (snooze {s.SnoozeCount}/2)",
+                        s.SnoozeCount.ToString(),
+                        "2");
+                    message = _translation.GetNotificationText(
+                        "DoseReminderSnoozeMessage",
+                        lang,
+                        $"Reminder: take your dose of \"{medName}\" - {um.Dosage}",
+                        medName,
+                        um.Dosage ?? string.Empty);
+                }
+                else if (um.AdvanceReminderMinutes.HasValue && um.AdvanceReminderMinutes.Value > 0)
                 {
                     var mins = um.AdvanceReminderMinutes.Value;
                     notifTime = s.ScheduledAt.AddMinutes(-mins);

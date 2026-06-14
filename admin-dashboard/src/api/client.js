@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5135';
+export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://drugsafe.runasp.net';
 export const TOKEN_KEY = 'medicine_admin_jwt';
 
 export const api = axios.create({

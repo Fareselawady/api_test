@@ -87,6 +87,7 @@ namespace api_test.Models
         public DateTime? TakenAt { get; set; }
         public DateTime? SkippedAt { get; set; }
         public DateTime? MissedAt { get; set; }
+        public DateTime? ActionAt { get; set; }
         public bool IsLate { get; set; }
         public string? MissedReason { get; set; }
         public string? ActionNote { get; set; }

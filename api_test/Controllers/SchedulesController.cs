@@ -182,14 +182,17 @@ namespace api_test.Controllers
                 .ToListAsync();
 
             var userMedIds = userMeds.Select(um => um.Id).ToList();
-            var schedules = await _context.MedicationSchedules
+            var schedulesQuery = _context.MedicationSchedules
                 .Include(s => s.UserMedication)
                     .ThenInclude(um => um.Medication)
-                .Where(s => userMedIds.Contains(s.UserMedicationId)
-                    && s.ScheduledAt >= range.From
-                    && s.ScheduledAt <= range.To)
-                .OrderBy(s => s.ScheduledAt)
+                .Where(s => userMedIds.Contains(s.UserMedicationId));
+
+            var schedules = await WhereDoseActionInRange(schedulesQuery, range.From, range.To)
                 .ToListAsync();
+
+            schedules = schedules
+                .OrderBy(s => GetDoseEventAt(s) ?? s.ScheduledAt)
+                .ToList();
 
             var summary = BuildAdherenceSummary(schedules, range.From, range.To, null);
             summary.Medications = userMeds
@@ -217,15 +220,18 @@ namespace api_test.Controllers
             if (!medExists)
                 return NotFound(new { message = "Medication not found or access denied." });
 
-            var schedules = await _context.MedicationSchedules
+            var schedulesQuery = _context.MedicationSchedules
                 .Include(s => s.UserMedication)
                     .ThenInclude(um => um.Medication)
                 .Where(s => s.UserMedicationId == userMedId
-                    && s.UserMedication!.UserId == userId
-                    && s.ScheduledAt >= range.From
-                    && s.ScheduledAt <= range.To)
-                .OrderBy(s => s.ScheduledAt)
+                    && s.UserMedication!.UserId == userId);
+
+            var schedules = await WhereDoseActionInRange(schedulesQuery, range.From, range.To)
                 .ToListAsync();
+
+            schedules = schedules
+                .OrderBy(s => GetDoseEventAt(s) ?? s.ScheduledAt)
+                .ToList();
 
             return Ok(BuildAdherenceSummary(schedules, range.From, range.To, userMedId));
         }
@@ -238,16 +244,18 @@ namespace api_test.Controllers
             var userId = GetUserId();
             var range = ResolveRange(from, to);
 
-            var schedules = await _context.MedicationSchedules
+            var schedulesQuery = _context.MedicationSchedules
                 .Include(s => s.UserMedication)
                     .ThenInclude(um => um.Medication)
-                .Where(s => s.UserMedication!.UserId == userId
-                    && s.ScheduledAt >= range.From
-                    && s.ScheduledAt <= range.To)
-                .OrderByDescending(s => s.ScheduledAt)
+                .Where(s => s.UserMedication!.UserId == userId);
+
+            var schedules = await WhereDoseActionInRange(schedulesQuery, range.From, range.To)
                 .ToListAsync();
 
-            return Ok(schedules.Select(ToDoseHistoryDto).ToList());
+            return Ok(schedules
+                .OrderByDescending(s => GetDoseEventAt(s) ?? s.ScheduledAt)
+                .Select(ToDoseHistoryDto)
+                .ToList());
         }
 
         private int GetUserId()
@@ -269,6 +277,34 @@ namespace api_test.Controllers
                 DateTime.SpecifyKind(resolvedTo, DateTimeKind.Utc));
         }
 
+        private static IQueryable<MedicationSchedule> WhereDoseActionInRange(
+            IQueryable<MedicationSchedule> query,
+            DateTime from,
+            DateTime to)
+        {
+            return query.Where(s =>
+                (s.Status == MedicationStatus.Taken &&
+                    ((s.TakenAt.HasValue && s.TakenAt.Value >= from && s.TakenAt.Value <= to) ||
+                     (!s.TakenAt.HasValue && s.ScheduledAt >= from && s.ScheduledAt <= to))) ||
+                (s.Status == MedicationStatus.Skipped &&
+                    ((s.SkippedAt.HasValue && s.SkippedAt.Value >= from && s.SkippedAt.Value <= to) ||
+                     (!s.SkippedAt.HasValue && s.ScheduledAt >= from && s.ScheduledAt <= to))) ||
+                (s.Status == MedicationStatus.Missed &&
+                    ((s.MissedAt.HasValue && s.MissedAt.Value >= from && s.MissedAt.Value <= to) ||
+                     (!s.MissedAt.HasValue && s.ScheduledAt >= from && s.ScheduledAt <= to))));
+        }
+
+        private static DateTime? GetDoseEventAt(MedicationSchedule schedule)
+        {
+            return schedule.Status switch
+            {
+                MedicationStatus.Taken => schedule.TakenAt ?? schedule.ScheduledAt,
+                MedicationStatus.Skipped => schedule.SkippedAt ?? schedule.ScheduledAt,
+                MedicationStatus.Missed => schedule.MissedAt ?? schedule.ScheduledAt,
+                _ => null
+            };
+        }
+
         private static AdherenceSummaryDto BuildAdherenceSummary(
             List<MedicationSchedule> schedules,
             DateTime from,
@@ -282,7 +318,7 @@ namespace api_test.Controllers
             var late = schedules.Count(IsLateDose);
 
             var dayStats = schedules
-                .GroupBy(s => s.ScheduledAt.Date)
+                .GroupBy(s => (GetDoseEventAt(s) ?? s.ScheduledAt).Date)
                 .Select(g => new
                 {
                     Day = g.Key,
@@ -329,7 +365,7 @@ namespace api_test.Controllers
             var late = schedules.Count(IsLateDose);
 
             var dayStats = schedules
-                .GroupBy(s => s.ScheduledAt.Date)
+                .GroupBy(s => (GetDoseEventAt(s) ?? s.ScheduledAt).Date)
                 .Select(g => new
                 {
                     Day = g.Key,
@@ -371,6 +407,7 @@ namespace api_test.Controllers
                 TakenAt = schedule.TakenAt,
                 SkippedAt = schedule.SkippedAt,
                 MissedAt = schedule.MissedAt,
+                ActionAt = GetDoseEventAt(schedule),
                 IsLate = IsLateDose(schedule),
                 MissedReason = schedule.MissedReason,
                 ActionNote = schedule.ActionNote,
@@ -387,7 +424,7 @@ namespace api_test.Controllers
         {
             var completed = schedules
                 .Where(s => s.Status is MedicationStatus.Taken or MedicationStatus.Missed or MedicationStatus.Skipped)
-                .OrderByDescending(s => s.ScheduledAt)
+                .OrderByDescending(s => GetDoseEventAt(s) ?? s.ScheduledAt)
                 .ToList();
 
             var streak = 0;

@@ -486,7 +486,11 @@ namespace api_test.Services
         // SKIP
         // =====================================================================
 
-        public async Task<SkipDoseResult> SkipDoseAsync(int scheduleId, int requestingUserId)
+        public async Task<SkipDoseResult> SkipDoseAsync(
+            int scheduleId,
+            int requestingUserId,
+            string? reason = null,
+            string? note = null)
         {
             var schedule = await _context.MedicationSchedules
                 .Include(s => s.UserMedication)
@@ -503,6 +507,9 @@ namespace api_test.Services
             var now = DateTime.UtcNow;
             schedule.Status = MedicationStatus.Skipped;
             schedule.SkippedAt = now;
+            schedule.MissedReason = CleanText(reason);
+            schedule.ActionNote = CleanText(note);
+            schedule.Notes = CleanText(note) ?? schedule.Notes;
             schedule.SnoozedUntil = null;
             schedule.ReminderSent = true;
 
@@ -516,7 +523,9 @@ namespace api_test.Services
                     MedicationScheduleId = schedule.Id,
                     Type = "SkippedConfirmation",
                     Title = "Skipped Confirmation",
-                    Message = $"Dose of \"{medName}\" skipped.",
+                    Message = string.IsNullOrWhiteSpace(schedule.MissedReason)
+                        ? $"Dose of \"{medName}\" skipped."
+                        : $"Dose of \"{medName}\" skipped. Reason: {schedule.MissedReason}.",
                     IsRead = false,
                     ScheduledAt = now,
                     CreatedAt = now
@@ -692,6 +701,9 @@ namespace api_test.Services
                 MissedAt = s.MissedAt.HasValue
                     ? s.MissedAt.Value.ToString("yyyy-MM-ddTHH:mm:ssZ")
                     : string.Empty,
+                MissedReason = s.MissedReason,
+                ActionNote = s.ActionNote,
+                Notes = s.Notes,
                 DosageForm = UserMedicationFeatureHelper.GetDosageForm(userMedication),
                 QuantityUnit = UserMedicationFeatureHelper.GetQuantityUnit(userMedication),
                 DoseQuantity = MedicationQuantityHelper.ResolveQuantity(s.UserMedication?.DoseQuantity, s.UserMedication?.PillsPerDose),
@@ -723,6 +735,9 @@ namespace api_test.Services
             => quantity.HasValue
                 ? quantity.Value.ToString("0.##")
                 : "0";
+
+        private static string? CleanText(string? value)
+            => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
         private static double GetPeriodHours(string periodUnit, int periodValue)
             => periodUnit.ToLower() switch

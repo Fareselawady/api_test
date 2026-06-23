@@ -21,6 +21,9 @@ namespace api_test.Models
         public string TakenAt { get; set; } = string.Empty;
         public string SkippedAt { get; set; } = string.Empty;
         public string MissedAt { get; set; } = string.Empty;
+        public string? MissedReason { get; set; }
+        public string? ActionNote { get; set; }
+        public string? Notes { get; set; }
         public decimal? DoseQuantity { get; set; }
         public decimal? CurrentQuantity { get; set; }
         public string? QuantityUnit { get; set; }

@@ -38,6 +38,10 @@ namespace api_test.Models
         public string? PeriodUnit { get; set; }
         public int? PeriodValue { get; set; }
         public int? IntervalHours { get; set; }
+        public string? MedicationUseType { get; set; }
+        public int? MaxDosesPerDay { get; set; }
+        public decimal? MinimumHoursBetweenDoses { get; set; }
+        public int? RefillReminderDaysBefore { get; set; }
         public bool NotificationActive { get; set; } = true;
         public int? AdvanceReminderMinutes { get; set; }
 

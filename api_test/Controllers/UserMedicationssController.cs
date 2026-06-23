@@ -64,6 +64,14 @@ namespace api_test.Controllers
             if (MedicationQuantityHelper.HasInvalidDoseQuantity(dto.DoseQuantity))
                 return BadRequest(new { Message = "doseQuantity must be greater than 0." });
 
+            var featureError = ValidateMedicationFeatureInputs(
+                dto.MedicationUseType,
+                dto.MaxDosesPerDay,
+                dto.MinimumHoursBetweenDoses,
+                dto.RefillReminderDaysBefore);
+            if (featureError != null)
+                return BadRequest(new { Message = featureError });
+
             // ── Resolve and validate custom dose times ────────────────────────
             var resolvedDoseTimes = ResolveDoseTimes(dto.DoseTimes, out string? doseTimeError);
             if (doseTimeError != null)
@@ -176,6 +184,10 @@ namespace api_test.Controllers
                 PeriodValue = dto.PeriodValue,
                 FirstDoseTime = dto.FirstDoseTime.HasValue ? TimeOnly.FromTimeSpan(dto.FirstDoseTime.Value) : null,
                 IntervalHours = hasCustomTimes ? null : dto.IntervalHours,
+                MedicationUseType = NormalizeMedicationUseType(dto.MedicationUseType),
+                MaxDosesPerDay = dto.MaxDosesPerDay,
+                MinimumHoursBetweenDoses = dto.MinimumHoursBetweenDoses,
+                RefillReminderDaysBefore = dto.RefillReminderDaysBefore,
                 NotificationActive = dto.NotificationActive,
                 AdvanceReminderMinutes = dto.AdvanceReminderMinutes == 0 ? null : dto.AdvanceReminderMinutes
             };
@@ -220,6 +232,10 @@ namespace api_test.Controllers
                 CurrentQuantity = userMed.CurrentQuantity,
                 DoseQuantity = userMed.DoseQuantity,
                 LowStockThreshold = userMed.LowStockThreshold,
+                userMed.MedicationUseType,
+                userMed.MaxDosesPerDay,
+                userMed.MinimumHoursBetweenDoses,
+                userMed.RefillReminderDaysBefore,
                 InteractionWarnings = warnings.Count > 0
     ? warnings.Select(w => w.Reason).ToList()
     : null
@@ -293,6 +309,7 @@ namespace api_test.Controllers
                 string finalName = UserMedicationFeatureHelper.GetDisplayName(um, _translationService, lang);
 
                 string? scheduleType = InferScheduleType(um);
+                var forecast = MedicationRefillForecastHelper.BuildForecast(um, DateTime.UtcNow);
 
                 List<string> doseTimes;
                 if (scheduleType == "CustomTimes" && scheduleTimeMap.TryGetValue(um.Id, out var times))
@@ -343,6 +360,16 @@ namespace api_test.Controllers
                     PeriodValue = um.PeriodValue,
                     FirstDoseTime = um.FirstDoseTime?.ToTimeSpan(),
                     IntervalHours = um.IntervalHours,
+                    MedicationUseType = NormalizeMedicationUseType(um.MedicationUseType),
+                    MaxDosesPerDay = um.MaxDosesPerDay,
+                    MinimumHoursBetweenDoses = um.MinimumHoursBetweenDoses,
+                    RefillReminderDaysBefore = um.RefillReminderDaysBefore,
+                    LastRefillDate = um.LastRefillDate,
+                    LastRefillQuantity = um.LastRefillQuantity,
+                    EstimatedRunOutDate = forecast.EstimatedRunOutDate,
+                    DaysUntilEmpty = forecast.DaysUntilEmpty,
+                    DosesRemaining = forecast.DosesRemaining,
+                    RefillWarning = forecast.RefillWarning,
                     NotificationActive = um.NotificationActive,
                     AdvanceReminderMinutes = um.AdvanceReminderMinutes,
                     ScheduleType = scheduleType,
@@ -384,6 +411,14 @@ namespace api_test.Controllers
                 return BadRequest(new { Message = "currentQuantity must not be negative." });
             if (MedicationQuantityHelper.HasInvalidDoseQuantity(dto.DoseQuantity))
                 return BadRequest(new { Message = "doseQuantity must be greater than 0." });
+
+            var featureError = ValidateMedicationFeatureInputs(
+                dto.MedicationUseType,
+                dto.MaxDosesPerDay,
+                dto.MinimumHoursBetweenDoses,
+                dto.RefillReminderDaysBefore);
+            if (featureError != null)
+                return BadRequest(new { Message = featureError });
 
             var nextIsOpened = dto.IsOpened ?? userMed.IsOpened;
             var afterOpeningError = MedicationExpiryHelper.ValidateAfterOpeningInput(
@@ -501,6 +536,10 @@ namespace api_test.Controllers
             if (dto.CurrentQuantity.HasValue) userMed.CurrentQuantity = dto.CurrentQuantity;
             if (dto.DoseQuantity.HasValue) userMed.DoseQuantity = dto.DoseQuantity;
             if (dto.QuantityUnit != null) userMed.QuantityUnit = MedicationQuantityHelper.ResolveUnit(effectiveDosageForm, dto.QuantityUnit);
+            if (dto.MedicationUseType != null) userMed.MedicationUseType = NormalizeMedicationUseType(dto.MedicationUseType);
+            if (dto.MaxDosesPerDay.HasValue) userMed.MaxDosesPerDay = dto.MaxDosesPerDay;
+            if (dto.MinimumHoursBetweenDoses.HasValue) userMed.MinimumHoursBetweenDoses = dto.MinimumHoursBetweenDoses;
+            if (dto.RefillReminderDaysBefore.HasValue) userMed.RefillReminderDaysBefore = dto.RefillReminderDaysBefore;
 
             if (dto.DosageForm != null || userMed.IsCustomMedication || string.IsNullOrWhiteSpace(userMed.DosageForm))
                 userMed.DosageForm = effectiveDosageForm;
@@ -651,6 +690,10 @@ namespace api_test.Controllers
                 CurrentQuantity = userMed.CurrentQuantity,
                 DoseQuantity = userMed.DoseQuantity,
                 LowStockThreshold = userMed.LowStockThreshold,
+                userMed.MedicationUseType,
+                userMed.MaxDosesPerDay,
+                userMed.MinimumHoursBetweenDoses,
+                userMed.RefillReminderDaysBefore,
                 ScheduleRegenerated = scheduleChanged
             });
         }
@@ -718,6 +761,202 @@ namespace api_test.Controllers
                 TicketId = ticket.Id,
                 Status = ticket.Status.ToString()
             });
+        }
+
+        [HttpPost("/api/user-medications/{id:int}/refill")]
+        public async Task<ActionResult> RefillMedication(int id, RefillMedicationDto dto)
+        {
+            var userId = GetUserId();
+            if (dto.Quantity <= 0)
+                return BadRequest(new { Message = "quantity must be greater than 0." });
+            if (dto.RefillReminderDaysBefore.HasValue && dto.RefillReminderDaysBefore.Value < 0)
+                return BadRequest(new { Message = "refillReminderDaysBefore must not be negative." });
+
+            var userMed = await _context.UserMedications
+                .Include(um => um.Medication)
+                .FirstOrDefaultAsync(um => um.Id == id && um.UserId == userId);
+            if (userMed == null)
+                return NotFound(new { Message = "UserMedication not found." });
+
+            var now = DateTime.UtcNow;
+            var refillDate = dto.RefillDate ?? now;
+            var currentQuantity = MedicationQuantityHelper.ResolveQuantity(userMed.CurrentQuantity, userMed.CurrentPillCount) ?? 0;
+            var initialQuantity = MedicationQuantityHelper.ResolveQuantity(userMed.InitialQuantity, userMed.InitialPillCount);
+
+            userMed.CurrentQuantity = currentQuantity + dto.Quantity;
+            userMed.CurrentPillCount = MedicationQuantityHelper.ResolveLegacyCount(null, userMed.CurrentQuantity);
+            if (!initialQuantity.HasValue || userMed.CurrentQuantity > initialQuantity)
+            {
+                userMed.InitialQuantity = userMed.CurrentQuantity;
+                userMed.InitialPillCount = MedicationQuantityHelper.ResolveLegacyCount(null, userMed.InitialQuantity);
+            }
+            userMed.LastRefillDate = refillDate;
+            userMed.LastRefillQuantity = dto.Quantity;
+            if (dto.RefillReminderDaysBefore.HasValue)
+                userMed.RefillReminderDaysBefore = dto.RefillReminderDaysBefore;
+
+            await _context.SaveChangesAsync();
+
+            var forecast = MedicationRefillForecastHelper.BuildForecast(userMed, now);
+            return Ok(new
+            {
+                Message = "Medication refill recorded successfully.",
+                userMed.Id,
+                userMed.CurrentQuantity,
+                userMed.QuantityUnit,
+                userMed.LastRefillDate,
+                userMed.LastRefillQuantity,
+                Forecast = forecast
+            });
+        }
+
+        [HttpPost("/api/user-medications/{id:int}/take-now")]
+        public async Task<ActionResult> TakeMedicationNow(int id, [FromBody] TakeNowDto dto)
+        {
+            var userId = GetUserId();
+            var userMed = await _context.UserMedications
+                .Include(um => um.Medication)
+                .FirstOrDefaultAsync(um => um.Id == id && um.UserId == userId);
+            if (userMed == null)
+                return NotFound(new { Message = "UserMedication not found." });
+
+            var now = DateTime.UtcNow;
+            var takenAt = dto.TakenAt ?? now;
+            var quantityTaken = dto.QuantityTaken ?? MedicationRefillForecastHelper.ResolveDoseQuantity(userMed);
+            if (quantityTaken <= 0)
+                return BadRequest(new { Message = "quantityTaken must be greater than 0." });
+
+            if (userMed.MinimumHoursBetweenDoses.HasValue && userMed.MinimumHoursBetweenDoses.Value > 0)
+            {
+                var previous = await _context.MedicationIntakeLogs
+                    .Where(l => l.UserMedicationId == id && l.TakenAt <= takenAt)
+                    .OrderByDescending(l => l.TakenAt)
+                    .FirstOrDefaultAsync();
+
+                if (previous != null)
+                {
+                    var hoursSince = (decimal)(takenAt - previous.TakenAt).TotalHours;
+                    if (hoursSince < userMed.MinimumHoursBetweenDoses.Value)
+                    {
+                        return BadRequest(new
+                        {
+                            Message = $"Minimum time between doses is {userMed.MinimumHoursBetweenDoses:0.##} hour(s).",
+                            PreviousTakenAt = previous.TakenAt
+                        });
+                    }
+                }
+            }
+
+            if (userMed.MaxDosesPerDay.HasValue && userMed.MaxDosesPerDay.Value > 0)
+            {
+                var dayStart = takenAt.Date;
+                var dayEnd = dayStart.AddDays(1);
+                var takenToday = await _context.MedicationIntakeLogs
+                    .CountAsync(l => l.UserMedicationId == id && l.TakenAt >= dayStart && l.TakenAt < dayEnd);
+                if (takenToday >= userMed.MaxDosesPerDay.Value)
+                {
+                    return BadRequest(new
+                    {
+                        Message = $"Maximum doses per day is {userMed.MaxDosesPerDay.Value}.",
+                        DosesAlreadyTakenToday = takenToday
+                    });
+                }
+            }
+
+            userMed.CurrentQuantity = MedicationQuantityHelper.ResolveQuantity(userMed.CurrentQuantity, userMed.CurrentPillCount);
+            if (userMed.CurrentQuantity.HasValue)
+            {
+                userMed.CurrentQuantity = Math.Max(0, userMed.CurrentQuantity.Value - quantityTaken);
+                userMed.CurrentPillCount = MedicationQuantityHelper.ResolveLegacyCount(null, userMed.CurrentQuantity);
+            }
+
+            var log = new MedicationIntakeLog
+            {
+                UserMedicationId = userMed.Id,
+                TakenAt = takenAt,
+                QuantityTaken = quantityTaken,
+                Reason = CleanText(dto.Reason),
+                Notes = CleanText(dto.Notes),
+                CreatedAt = now
+            };
+            _context.MedicationIntakeLogs.Add(log);
+
+            await CreateRefillWarningIfNeededAsync(userMed, now);
+            await _context.SaveChangesAsync();
+
+            var forecast = MedicationRefillForecastHelper.BuildForecast(userMed, now);
+            return Ok(new
+            {
+                Message = "Medication intake logged successfully.",
+                Intake = ToIntakeLogDto(log, userMed),
+                userMed.CurrentQuantity,
+                userMed.CurrentPillCount,
+                Forecast = forecast
+            });
+        }
+
+        [HttpGet("/api/user-medications/{id:int}/intake-history")]
+        public async Task<ActionResult<List<MedicationIntakeLogDto>>> GetMedicationIntakeHistory(int id)
+        {
+            var userId = GetUserId();
+            var userMed = await _context.UserMedications
+                .Include(um => um.Medication)
+                .FirstOrDefaultAsync(um => um.Id == id && um.UserId == userId);
+            if (userMed == null)
+                return NotFound(new { Message = "UserMedication not found." });
+
+            var logs = await _context.MedicationIntakeLogs
+                .Where(l => l.UserMedicationId == id)
+                .OrderByDescending(l => l.TakenAt)
+                .ToListAsync();
+
+            return Ok(logs.Select(log => ToIntakeLogDto(log, userMed)).ToList());
+        }
+
+        [HttpGet("/api/users/me/cabinet-health")]
+        public async Task<ActionResult<CabinetHealthDto>> GetCabinetHealth()
+        {
+            var userId = GetUserId();
+            var now = DateTime.UtcNow;
+            var meds = await _context.UserMedications
+                .Include(um => um.Medication)
+                .Where(um => um.UserId == userId)
+                .ToListAsync();
+
+            var dashboard = new CabinetHealthDto();
+            foreach (var med in meds)
+            {
+                var forecast = MedicationRefillForecastHelper.BuildForecast(med, now);
+                var effectiveExpiry = MedicationExpiryHelper.GetEffectiveExpiryDate(med);
+                var currentQuantity = MedicationQuantityHelper.ResolveQuantity(med.CurrentQuantity, med.CurrentPillCount);
+                var lowStock = currentQuantity.HasValue
+                    && med.LowStockThreshold.HasValue
+                    && currentQuantity.Value <= med.LowStockThreshold.Value;
+                var outOfStock = currentQuantity.HasValue && currentQuantity.Value <= 0;
+                var expired = effectiveExpiry.HasValue && effectiveExpiry.Value.Date < now.Date;
+                var expiringSoon = effectiveExpiry.HasValue
+                    && effectiveExpiry.Value.Date >= now.Date
+                    && effectiveExpiry.Value.Date <= now.Date.AddDays(7);
+                var afterOpeningSoon = med.AfterOpeningExpiryDate.HasValue
+                    && med.AfterOpeningExpiryDate.Value.Date >= now.Date
+                    && med.AfterOpeningExpiryDate.Value.Date <= now.Date.AddDays(7);
+
+                if (expired)
+                    dashboard.Expired.Add(BuildCabinetItem(med, forecast, "Critical", "Medication is expired."));
+                if (expiringSoon)
+                    dashboard.ExpiringSoon.Add(BuildCabinetItem(med, forecast, "Warning", "Medication expires within 7 days."));
+                if (afterOpeningSoon)
+                    dashboard.AfterOpeningExpiringSoon.Add(BuildCabinetItem(med, forecast, "Warning", "Opened medication expires soon."));
+                if (outOfStock)
+                    dashboard.OutOfStock.Add(BuildCabinetItem(med, forecast, "Critical", "Medication is out of stock."));
+                else if (lowStock)
+                    dashboard.LowStock.Add(BuildCabinetItem(med, forecast, "Warning", "Medication stock is low."));
+
+                if (!expired && !expiringSoon && !afterOpeningSoon && !outOfStock && !lowStock)
+                    dashboard.Healthy.Add(BuildCabinetItem(med, forecast, "Info", "Medication looks healthy."));
+            }
+
+            return Ok(dashboard);
         }
 
         // ================= DELETE =================
@@ -838,6 +1077,14 @@ namespace api_test.Controllers
             if (MedicationQuantityHelper.HasInvalidDoseQuantity(dto.DoseQuantity))
                 return BadRequest(new { Message = "doseQuantity must be greater than 0." });
 
+            var featureError = ValidateMedicationFeatureInputs(
+                dto.MedicationUseType,
+                dto.MaxDosesPerDay,
+                dto.MinimumHoursBetweenDoses,
+                dto.RefillReminderDaysBefore);
+            if (featureError != null)
+                return BadRequest(new { Message = featureError });
+
             var afterOpeningError = MedicationExpiryHelper.ValidateAfterOpeningInput(
                 dto.IsOpened,
                 dto.OpenedDate,
@@ -925,6 +1172,10 @@ namespace api_test.Controllers
             userMed.LowStockThreshold = dto.LowStockThreshold;
             userMed.NotificationActive = dto.NotificationActive;
             userMed.AdvanceReminderMinutes = dto.AdvanceReminderMinutes == 0 ? null : dto.AdvanceReminderMinutes;
+            userMed.MedicationUseType = NormalizeMedicationUseType(dto.MedicationUseType);
+            userMed.MaxDosesPerDay = dto.MaxDosesPerDay;
+            userMed.MinimumHoursBetweenDoses = dto.MinimumHoursBetweenDoses;
+            userMed.RefillReminderDaysBefore = dto.RefillReminderDaysBefore;
 
             // PillsPerDose: save provided value (null means clear/unset for the details endpoint
             // which is a full-replace style endpoint like the original fields above)
@@ -1064,7 +1315,11 @@ namespace api_test.Controllers
                 InitialQuantity = userMed.InitialQuantity,
                 CurrentQuantity = userMed.CurrentQuantity,
                 DoseQuantity = userMed.DoseQuantity,
-                LowStockThreshold = userMed.LowStockThreshold
+                LowStockThreshold = userMed.LowStockThreshold,
+                userMed.MedicationUseType,
+                userMed.MaxDosesPerDay,
+                userMed.MinimumHoursBetweenDoses,
+                userMed.RefillReminderDaysBefore
             });
         }
 
@@ -1170,6 +1425,117 @@ namespace api_test.Controllers
                 $"Quantity unit: {quantityUnit ?? "unit"}\n\n" +
                 "Please review this medication and consider adding it to the medication database.";
         }
+
+        private async Task CreateRefillWarningIfNeededAsync(UserMedication userMed, DateTime now)
+        {
+            var forecast = MedicationRefillForecastHelper.BuildForecast(userMed, now);
+            if (!forecast.RefillWarning || !userMed.NotificationActive)
+                return;
+
+            var alreadySentToday = await _context.Alerts.AnyAsync(a =>
+                a.UserMedicationId == userMed.Id
+                && a.Type == "RefillWarning"
+                && a.CreatedAt.Date == now.Date);
+            if (alreadySentToday)
+                return;
+
+            var medName = UserMedicationFeatureHelper.GetDisplayName(userMed);
+            var runOutText = forecast.EstimatedRunOutDate.HasValue
+                ? $"Estimated run-out date: {forecast.EstimatedRunOutDate.Value:dd/MM/yyyy}."
+                : "Run-out date is not available.";
+
+            _context.Alerts.Add(new Alert
+            {
+                UserId = userMed.UserId,
+                UserMedicationId = userMed.Id,
+                Type = "RefillWarning",
+                Title = "Refill needed soon",
+                Message = $"\"{medName}\" may run out soon. {runOutText}",
+                IsRead = false,
+                ScheduledAt = now,
+                CreatedAt = now
+            });
+        }
+
+        private static MedicationIntakeLogDto ToIntakeLogDto(MedicationIntakeLog log, UserMedication userMed)
+        {
+            return new MedicationIntakeLogDto
+            {
+                Id = log.Id,
+                UserMedicationId = log.UserMedicationId,
+                MedicationName = UserMedicationFeatureHelper.GetDisplayName(userMed),
+                TakenAt = log.TakenAt,
+                QuantityTaken = log.QuantityTaken,
+                QuantityUnit = UserMedicationFeatureHelper.GetQuantityUnit(userMed),
+                Reason = log.Reason,
+                Notes = log.Notes
+            };
+        }
+
+        private static CabinetMedicationDto BuildCabinetItem(
+            UserMedication userMed,
+            RefillForecastDto forecast,
+            string severity,
+            string reason)
+        {
+            return new CabinetMedicationDto
+            {
+                UserMedicationId = userMed.Id,
+                MedicationName = UserMedicationFeatureHelper.GetDisplayName(userMed),
+                Severity = severity,
+                EffectiveExpiryDate = MedicationExpiryHelper.GetEffectiveExpiryDate(userMed),
+                AfterOpeningExpiryDate = userMed.AfterOpeningExpiryDate,
+                CurrentQuantity = MedicationQuantityHelper.ResolveQuantity(userMed.CurrentQuantity, userMed.CurrentPillCount),
+                DoseQuantity = MedicationQuantityHelper.ResolveQuantity(userMed.DoseQuantity, userMed.PillsPerDose),
+                QuantityUnit = UserMedicationFeatureHelper.GetQuantityUnit(userMed),
+                DaysUntilEmpty = forecast.DaysUntilEmpty,
+                EstimatedRunOutDate = forecast.EstimatedRunOutDate,
+                Reason = reason
+            };
+        }
+
+        private static string NormalizeMedicationUseType(string? value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+                return "Scheduled";
+
+            return value.Trim().Equals("AsNeeded", StringComparison.OrdinalIgnoreCase)
+                || value.Trim().Equals("PRN", StringComparison.OrdinalIgnoreCase)
+                || value.Trim().Equals("TakeAsNeeded", StringComparison.OrdinalIgnoreCase)
+                    ? "AsNeeded"
+                    : "Scheduled";
+        }
+
+        private static string? ValidateMedicationFeatureInputs(
+            string? medicationUseType,
+            int? maxDosesPerDay,
+            decimal? minimumHoursBetweenDoses,
+            int? refillReminderDaysBefore)
+        {
+            if (!string.IsNullOrWhiteSpace(medicationUseType))
+            {
+                var raw = medicationUseType.Trim();
+                if (!raw.Equals("Scheduled", StringComparison.OrdinalIgnoreCase)
+                    && !raw.Equals("AsNeeded", StringComparison.OrdinalIgnoreCase)
+                    && !raw.Equals("PRN", StringComparison.OrdinalIgnoreCase)
+                    && !raw.Equals("TakeAsNeeded", StringComparison.OrdinalIgnoreCase))
+                {
+                    return "medicationUseType must be Scheduled or AsNeeded.";
+                }
+            }
+
+            if (maxDosesPerDay.HasValue && maxDosesPerDay.Value <= 0)
+                return "maxDosesPerDay must be greater than 0.";
+            if (minimumHoursBetweenDoses.HasValue && minimumHoursBetweenDoses.Value < 0)
+                return "minimumHoursBetweenDoses must not be negative.";
+            if (refillReminderDaysBefore.HasValue && refillReminderDaysBefore.Value < 0)
+                return "refillReminderDaysBefore must not be negative.";
+
+            return null;
+        }
+
+        private static string? CleanText(string? value)
+            => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
         private int GetUserId()
         {

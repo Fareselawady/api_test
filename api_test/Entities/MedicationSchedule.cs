@@ -17,6 +17,8 @@ namespace api_test.Entities
         public DateTime? TakenAt { get; set; }
         public DateTime? SkippedAt { get; set; }
         public DateTime? MissedAt { get; set; }
+        public string? MissedReason { get; set; }
+        public string? ActionNote { get; set; }
 
         public bool ReminderSent { get; set; } = false;
         public bool AdvanceReminderSent { get; set; } = false;

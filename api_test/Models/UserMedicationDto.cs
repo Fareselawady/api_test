@@ -46,6 +46,16 @@ namespace api_test.Models
         public int? PeriodValue { get; set; }
 
         public int? IntervalHours { get; set; }
+        public string MedicationUseType { get; set; } = "Scheduled";
+        public int? MaxDosesPerDay { get; set; }
+        public decimal? MinimumHoursBetweenDoses { get; set; }
+        public int? RefillReminderDaysBefore { get; set; }
+        public DateTime? LastRefillDate { get; set; }
+        public decimal? LastRefillQuantity { get; set; }
+        public DateTime? EstimatedRunOutDate { get; set; }
+        public int? DaysUntilEmpty { get; set; }
+        public decimal? DosesRemaining { get; set; }
+        public bool RefillWarning { get; set; }
 
         public bool NotificationActive { get; set; }
         public int? AdvanceReminderMinutes { get; set; }

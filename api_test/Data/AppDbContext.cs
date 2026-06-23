@@ -27,6 +27,7 @@ namespace api_test.Data
         // ── Feature 2: Support Tickets ────────────────────────────────────────
         public DbSet<SupportTicket> SupportTickets { get; set; }
         public DbSet<MedicineScanHistory> MedicineScanHistories { get; set; }
+        public DbSet<MedicationIntakeLog> MedicationIntakeLogs { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -60,6 +61,9 @@ namespace api_test.Data
                 entity.Property(e => e.InitialQuantity).HasPrecision(18, 2);
                 entity.Property(e => e.CurrentQuantity).HasPrecision(18, 2);
                 entity.Property(e => e.DoseQuantity).HasPrecision(18, 2);
+                entity.Property(e => e.MedicationUseType).HasDefaultValue("Scheduled");
+                entity.Property(e => e.MinimumHoursBetweenDoses).HasPrecision(18, 2);
+                entity.Property(e => e.LastRefillQuantity).HasPrecision(18, 2);
             });
 
             modelBuilder.Entity<Medication>(entity =>
@@ -73,6 +77,15 @@ namespace api_test.Data
                 entity.Property(e => e.UserMedicationId).HasColumnName("UserMedId");
                 entity.Property(e => e.NotificationTime).IsRequired(false);
                 entity.Property(e => e.Status).HasConversion<string>();
+            });
+
+            modelBuilder.Entity<MedicationIntakeLog>(entity =>
+            {
+                entity.Property(e => e.QuantityTaken).HasPrecision(18, 2);
+                entity.HasOne(e => e.UserMedication)
+                    .WithMany(um => um.IntakeLogs)
+                    .HasForeignKey(e => e.UserMedicationId)
+                    .OnDelete(DeleteBehavior.Cascade);
             });
 
             modelBuilder.Entity<MedIngredientLink>()

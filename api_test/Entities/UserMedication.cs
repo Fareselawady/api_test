@@ -50,11 +50,19 @@ namespace api_test.Entities
         public TimeOnly? FirstDoseTime { get; set; }
         public int? IntervalHours { get; set; }
 
+        public string MedicationUseType { get; set; } = "Scheduled";
+        public int? MaxDosesPerDay { get; set; }
+        public decimal? MinimumHoursBetweenDoses { get; set; }
+        public int? RefillReminderDaysBefore { get; set; }
+        public DateTime? LastRefillDate { get; set; }
+        public decimal? LastRefillQuantity { get; set; }
+
         public bool NotificationActive { get; set; } = true;
         public int? AdvanceReminderMinutes { get; set; }
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
         public ICollection<MedicationSchedule> MedicationSchedules { get; set; } = new List<MedicationSchedule>();
+        public ICollection<MedicationIntakeLog> IntakeLogs { get; set; } = new List<MedicationIntakeLog>();
         public ICollection<Alert> Alerts { get; set; } = new List<Alert>();
     }
 }

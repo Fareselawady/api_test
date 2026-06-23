@@ -1,7 +1,10 @@
+using api_test.Data;
+using api_test.Entities;
 using api_test.Models;
 using api_test.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using System.Security.Claims;
 
 namespace api_test.Controllers
@@ -11,10 +14,12 @@ namespace api_test.Controllers
     public class SchedulesController : ControllerBase
     {
         private readonly IScheduleService _scheduleService;
+        private readonly AppDbContext _context;
 
-        public SchedulesController(IScheduleService scheduleService)
+        public SchedulesController(IScheduleService scheduleService, AppDbContext context)
         {
             _scheduleService = scheduleService;
+            _context = context;
         }
 
         // ── GET /api/medications/{userMedId}/schedules ────────────────────────
@@ -122,10 +127,12 @@ namespace api_test.Controllers
 
         // ── POST /api/schedules/{scheduleId}/skip ─────────────────────────────
         [HttpPost("api/schedules/{scheduleId:int}/skip")]
-        public async Task<ActionResult<SkipDoseResult>> SkipDose(int scheduleId)
+        public async Task<ActionResult<SkipDoseResult>> SkipDose(
+            int scheduleId,
+            [FromBody] SkipDoseRequestDto dto)
         {
             var userId = GetUserId();
-            var result = await _scheduleService.SkipDoseAsync(scheduleId, userId);
+            var result = await _scheduleService.SkipDoseAsync(scheduleId, userId, dto.Reason, dto.Note);
 
             if (!result.Succeeded)
                 return result.Error!.Contains("not found")
@@ -160,11 +167,238 @@ namespace api_test.Controllers
         }
 
         // ── Helpers ───────────────────────────────────────────────────────────
+        [HttpGet("api/users/me/adherence-summary")]
+        public async Task<ActionResult<AdherenceSummaryDto>> GetMyAdherenceSummary(
+            [FromQuery] DateTime? from,
+            [FromQuery] DateTime? to)
+        {
+            var userId = GetUserId();
+            var range = ResolveRange(from, to);
+
+            var userMeds = await _context.UserMedications
+                .Include(um => um.Medication)
+                .Where(um => um.UserId == userId)
+                .OrderBy(um => um.MedicationName)
+                .ToListAsync();
+
+            var userMedIds = userMeds.Select(um => um.Id).ToList();
+            var schedules = await _context.MedicationSchedules
+                .Include(s => s.UserMedication)
+                    .ThenInclude(um => um.Medication)
+                .Where(s => userMedIds.Contains(s.UserMedicationId)
+                    && s.ScheduledAt >= range.From
+                    && s.ScheduledAt <= range.To)
+                .OrderBy(s => s.ScheduledAt)
+                .ToListAsync();
+
+            var summary = BuildAdherenceSummary(schedules, range.From, range.To, null);
+            summary.Medications = userMeds
+                .Select(um => BuildMedicationAdherenceSummary(
+                    um,
+                    schedules.Where(s => s.UserMedicationId == um.Id).ToList(),
+                    range.From,
+                    range.To))
+                .ToList();
+
+            return Ok(summary);
+        }
+
+        [HttpGet("api/medications/{userMedId:int}/adherence")]
+        public async Task<ActionResult<AdherenceSummaryDto>> GetMedicationAdherence(
+            int userMedId,
+            [FromQuery] DateTime? from,
+            [FromQuery] DateTime? to)
+        {
+            var userId = GetUserId();
+            var range = ResolveRange(from, to);
+
+            var medExists = await _context.UserMedications
+                .AnyAsync(um => um.Id == userMedId && um.UserId == userId);
+            if (!medExists)
+                return NotFound(new { message = "Medication not found or access denied." });
+
+            var schedules = await _context.MedicationSchedules
+                .Include(s => s.UserMedication)
+                    .ThenInclude(um => um.Medication)
+                .Where(s => s.UserMedicationId == userMedId
+                    && s.UserMedication!.UserId == userId
+                    && s.ScheduledAt >= range.From
+                    && s.ScheduledAt <= range.To)
+                .OrderBy(s => s.ScheduledAt)
+                .ToListAsync();
+
+            return Ok(BuildAdherenceSummary(schedules, range.From, range.To, userMedId));
+        }
+
+        [HttpGet("api/users/me/dose-history")]
+        public async Task<ActionResult<List<DoseHistoryDto>>> GetMyDoseHistory(
+            [FromQuery] DateTime? from,
+            [FromQuery] DateTime? to)
+        {
+            var userId = GetUserId();
+            var range = ResolveRange(from, to);
+
+            var schedules = await _context.MedicationSchedules
+                .Include(s => s.UserMedication)
+                    .ThenInclude(um => um.Medication)
+                .Where(s => s.UserMedication!.UserId == userId
+                    && s.ScheduledAt >= range.From
+                    && s.ScheduledAt <= range.To)
+                .OrderByDescending(s => s.ScheduledAt)
+                .ToListAsync();
+
+            return Ok(schedules.Select(ToDoseHistoryDto).ToList());
+        }
+
         private int GetUserId()
         {
             var claim = User.FindFirst(ClaimTypes.NameIdentifier)
                 ?? throw new UnauthorizedAccessException("NameIdentifier claim missing.");
             return int.Parse(claim.Value);
+        }
+
+        private static (DateTime From, DateTime To) ResolveRange(DateTime? from, DateTime? to)
+        {
+            var resolvedTo = to ?? DateTime.UtcNow;
+            var resolvedFrom = from ?? resolvedTo.AddDays(-30);
+
+            if (resolvedFrom > resolvedTo)
+                (resolvedFrom, resolvedTo) = (resolvedTo, resolvedFrom);
+
+            return (DateTime.SpecifyKind(resolvedFrom, DateTimeKind.Utc),
+                DateTime.SpecifyKind(resolvedTo, DateTimeKind.Utc));
+        }
+
+        private static AdherenceSummaryDto BuildAdherenceSummary(
+            List<MedicationSchedule> schedules,
+            DateTime from,
+            DateTime to,
+            int? userMedicationId)
+        {
+            var total = schedules.Count;
+            var taken = schedules.Count(s => s.Status == MedicationStatus.Taken);
+            var missed = schedules.Count(s => s.Status == MedicationStatus.Missed);
+            var skipped = schedules.Count(s => s.Status == MedicationStatus.Skipped);
+            var late = schedules.Count(IsLateDose);
+
+            var dayStats = schedules
+                .GroupBy(s => s.ScheduledAt.Date)
+                .Select(g => new
+                {
+                    Day = g.Key,
+                    Rate = g.Count() == 0 ? 0 : (decimal)g.Count(s => s.Status == MedicationStatus.Taken) / g.Count()
+                })
+                .ToList();
+
+            var medicationName = schedules.FirstOrDefault()?.UserMedication is { } userMed
+                ? UserMedicationFeatureHelper.GetDisplayName(userMed)
+                : null;
+
+            return new AdherenceSummaryDto
+            {
+                UserMedicationId = userMedicationId,
+                MedicationName = medicationName,
+                From = from,
+                To = to,
+                TotalDoses = total,
+                TakenDoses = taken,
+                MissedDoses = missed,
+                SkippedDoses = skipped,
+                LateDoses = late,
+                AdherenceRate = total == 0 ? 0 : Math.Round((decimal)taken / total * 100, 2),
+                CurrentStreak = CalculateCurrentStreak(schedules),
+                BestDay = dayStats.Count == 0
+                    ? null
+                    : dayStats.OrderByDescending(d => d.Rate).ThenBy(d => d.Day).First().Day.ToString("yyyy-MM-dd"),
+                WorstDay = dayStats.Count == 0
+                    ? null
+                    : dayStats.OrderBy(d => d.Rate).ThenBy(d => d.Day).First().Day.ToString("yyyy-MM-dd")
+            };
+        }
+
+        private static MedicationAdherenceSummaryDto BuildMedicationAdherenceSummary(
+            UserMedication userMedication,
+            List<MedicationSchedule> schedules,
+            DateTime from,
+            DateTime to)
+        {
+            var total = schedules.Count;
+            var taken = schedules.Count(s => s.Status == MedicationStatus.Taken);
+            var missed = schedules.Count(s => s.Status == MedicationStatus.Missed);
+            var skipped = schedules.Count(s => s.Status == MedicationStatus.Skipped);
+            var late = schedules.Count(IsLateDose);
+
+            var dayStats = schedules
+                .GroupBy(s => s.ScheduledAt.Date)
+                .Select(g => new
+                {
+                    Day = g.Key,
+                    Rate = g.Count() == 0 ? 0 : (decimal)g.Count(s => s.Status == MedicationStatus.Taken) / g.Count()
+                })
+                .ToList();
+
+            return new MedicationAdherenceSummaryDto
+            {
+                UserMedicationId = userMedication.Id,
+                MedicationName = UserMedicationFeatureHelper.GetDisplayName(userMedication),
+                From = from,
+                To = to,
+                TotalDoses = total,
+                TakenDoses = taken,
+                MissedDoses = missed,
+                SkippedDoses = skipped,
+                LateDoses = late,
+                AdherenceRate = total == 0 ? 0 : Math.Round((decimal)taken / total * 100, 2),
+                CurrentStreak = CalculateCurrentStreak(schedules),
+                BestDay = dayStats.Count == 0
+                    ? null
+                    : dayStats.OrderByDescending(d => d.Rate).ThenBy(d => d.Day).First().Day.ToString("yyyy-MM-dd"),
+                WorstDay = dayStats.Count == 0
+                    ? null
+                    : dayStats.OrderBy(d => d.Rate).ThenBy(d => d.Day).First().Day.ToString("yyyy-MM-dd")
+            };
+        }
+
+        private static DoseHistoryDto ToDoseHistoryDto(MedicationSchedule schedule)
+        {
+            return new DoseHistoryDto
+            {
+                ScheduleId = schedule.Id,
+                UserMedicationId = schedule.UserMedicationId,
+                MedicationName = UserMedicationFeatureHelper.GetDisplayName(schedule.UserMedication),
+                ScheduledAt = schedule.ScheduledAt,
+                Status = schedule.Status.ToString(),
+                TakenAt = schedule.TakenAt,
+                SkippedAt = schedule.SkippedAt,
+                MissedAt = schedule.MissedAt,
+                IsLate = IsLateDose(schedule),
+                MissedReason = schedule.MissedReason,
+                ActionNote = schedule.ActionNote,
+                Notes = schedule.Notes
+            };
+        }
+
+        private static bool IsLateDose(MedicationSchedule schedule)
+            => schedule.Status == MedicationStatus.Taken
+               && schedule.TakenAt.HasValue
+               && schedule.TakenAt.Value > schedule.ScheduledAt.AddMinutes(15);
+
+        private static int CalculateCurrentStreak(List<MedicationSchedule> schedules)
+        {
+            var completed = schedules
+                .Where(s => s.Status is MedicationStatus.Taken or MedicationStatus.Missed or MedicationStatus.Skipped)
+                .OrderByDescending(s => s.ScheduledAt)
+                .ToList();
+
+            var streak = 0;
+            foreach (var schedule in completed)
+            {
+                if (schedule.Status != MedicationStatus.Taken)
+                    break;
+                streak++;
+            }
+
+            return streak;
         }
     }
 }

@@ -47,6 +47,7 @@ namespace api_test.Controllers
                     .ThenInclude(um => um.Medication)
                 .Where(s =>
                     s.UserMedication!.UserId == userId &&
+                    s.UserMedication.NotificationActive &&
                     (s.Status == MedicationStatus.Pending || s.Status == MedicationStatus.Snoozed) &&
                     (s.Status == MedicationStatus.Snoozed ? s.SnoozedUntil : s.ScheduledAt) > nowUtc)
                 .OrderBy(s => s.Status == MedicationStatus.Snoozed ? s.SnoozedUntil : s.ScheduledAt)

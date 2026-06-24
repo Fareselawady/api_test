@@ -234,6 +234,7 @@ namespace api_test.Services
                 .Include(s => s.UserMedication)
                     .ThenInclude(um => um!.Medication)
                 .Where(s => s.UserMedication!.UserId == userId
+                         && s.UserMedication.NotificationActive
                          && s.ScheduledAt >= todayStart
                          && s.ScheduledAt < todayEnd)
                 .OrderBy(s => s.ScheduledAt)
@@ -253,6 +254,7 @@ namespace api_test.Services
                 .Include(s => s.UserMedication)
                     .ThenInclude(um => um!.Medication)
                 .Where(s => s.UserMedication!.UserId == userId
+                         && s.UserMedication.NotificationActive
                          && s.ScheduledAt >= utcStart
                          && s.ScheduledAt < utcEnd)
                 .OrderBy(s => s.ScheduledAt)

@@ -76,6 +76,9 @@ namespace api_test.Services
 
         private async Task GenerateScheduleAsync(UserMedication userMed, bool fromNow)
         {
+            if (IsAsNeeded(userMed))
+                return;
+
             if (!userMed.StartDate.HasValue || !userMed.FirstDoseTime.HasValue)
                 return;
 
@@ -136,6 +139,9 @@ namespace api_test.Services
         private async Task GenerateCustomTimesScheduleAsync(
             UserMedication userMed, List<TimeOnly> doseTimes, bool fromNow)
         {
+            if (IsAsNeeded(userMed))
+                return;
+
             if (!userMed.StartDate.HasValue) return;
 
             var schedules = new List<MedicationSchedule>();
@@ -235,6 +241,7 @@ namespace api_test.Services
                     .ThenInclude(um => um!.Medication)
                 .Where(s => s.UserMedication!.UserId == userId
                          && s.UserMedication.NotificationActive
+                         && s.UserMedication.MedicationUseType != "AsNeeded"
                          && s.ScheduledAt >= todayStart
                          && s.ScheduledAt < todayEnd)
                 .OrderBy(s => s.ScheduledAt)
@@ -255,6 +262,7 @@ namespace api_test.Services
                     .ThenInclude(um => um!.Medication)
                 .Where(s => s.UserMedication!.UserId == userId
                          && s.UserMedication.NotificationActive
+                         && s.UserMedication.MedicationUseType != "AsNeeded"
                          && s.ScheduledAt >= utcStart
                          && s.ScheduledAt < utcEnd)
                 .OrderBy(s => s.ScheduledAt)
@@ -740,6 +748,9 @@ namespace api_test.Services
 
         private static string? CleanText(string? value)
             => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+        private static bool IsAsNeeded(UserMedication userMed)
+            => string.Equals(userMed.MedicationUseType, "AsNeeded", StringComparison.OrdinalIgnoreCase);
 
         private static double GetPeriodHours(string periodUnit, int periodValue)
             => periodUnit.ToLower() switch

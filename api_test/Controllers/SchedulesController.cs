@@ -185,7 +185,8 @@ namespace api_test.Controllers
             var schedulesQuery = _context.MedicationSchedules
                 .Include(s => s.UserMedication)
                     .ThenInclude(um => um.Medication)
-                .Where(s => userMedIds.Contains(s.UserMedicationId));
+                .Where(s => userMedIds.Contains(s.UserMedicationId)
+                    && s.UserMedication!.MedicationUseType != "AsNeeded");
 
             var schedules = await WhereDoseActionInRange(schedulesQuery, range.From, range.To)
                 .ToListAsync();
@@ -224,7 +225,8 @@ namespace api_test.Controllers
                 .Include(s => s.UserMedication)
                     .ThenInclude(um => um.Medication)
                 .Where(s => s.UserMedicationId == userMedId
-                    && s.UserMedication!.UserId == userId);
+                    && s.UserMedication!.UserId == userId
+                    && s.UserMedication.MedicationUseType != "AsNeeded");
 
             var schedules = await WhereDoseActionInRange(schedulesQuery, range.From, range.To)
                 .ToListAsync();
@@ -247,14 +249,28 @@ namespace api_test.Controllers
             var schedulesQuery = _context.MedicationSchedules
                 .Include(s => s.UserMedication)
                     .ThenInclude(um => um.Medication)
-                .Where(s => s.UserMedication!.UserId == userId);
+                .Where(s => s.UserMedication!.UserId == userId
+                    && s.UserMedication.MedicationUseType != "AsNeeded");
 
             var schedules = await WhereDoseActionInRange(schedulesQuery, range.From, range.To)
+                .ToListAsync();
+
+            var intakeLogs = await _context.MedicationIntakeLogs
+                .Include(l => l.UserMedication)
+                    .ThenInclude(um => um.Medication)
+                .Where(l => l.UserMedication!.UserId == userId
+                    && l.UserMedication.MedicationUseType == "AsNeeded"
+                    && l.TakenAt >= range.From
+                    && l.TakenAt <= range.To)
                 .ToListAsync();
 
             return Ok(schedules
                 .OrderByDescending(s => GetDoseEventAt(s) ?? s.ScheduledAt)
                 .Select(ToDoseHistoryDto)
+                .Concat(intakeLogs
+                    .OrderByDescending(l => l.TakenAt)
+                    .Select(ToAsNeededDoseHistoryDto))
+                .OrderByDescending(h => h.ActionAt ?? h.ScheduledAt)
                 .ToList());
         }
 
@@ -408,10 +424,30 @@ namespace api_test.Controllers
                 SkippedAt = schedule.SkippedAt,
                 MissedAt = schedule.MissedAt,
                 ActionAt = GetDoseEventAt(schedule),
+                IsAsNeeded = false,
                 IsLate = IsLateDose(schedule),
                 MissedReason = schedule.MissedReason,
                 ActionNote = schedule.ActionNote,
                 Notes = schedule.Notes
+            };
+        }
+
+        private static DoseHistoryDto ToAsNeededDoseHistoryDto(MedicationIntakeLog log)
+        {
+            return new DoseHistoryDto
+            {
+                ScheduleId = log.Id,
+                UserMedicationId = log.UserMedicationId,
+                MedicationName = UserMedicationFeatureHelper.GetDisplayName(log.UserMedication),
+                ScheduledAt = log.TakenAt,
+                Status = "TakenNow",
+                TakenAt = log.TakenAt,
+                ActionAt = log.TakenAt,
+                IsAsNeeded = true,
+                IsLate = false,
+                MissedReason = log.Reason,
+                ActionNote = log.Notes,
+                Notes = log.Notes
             };
         }
 

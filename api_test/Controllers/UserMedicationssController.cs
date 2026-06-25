@@ -537,6 +537,17 @@ namespace api_test.Controllers
             if (dto.DoseQuantity.HasValue) userMed.DoseQuantity = dto.DoseQuantity;
             if (dto.QuantityUnit != null) userMed.QuantityUnit = MedicationQuantityHelper.ResolveUnit(effectiveDosageForm, dto.QuantityUnit);
             if (dto.MedicationUseType != null) userMed.MedicationUseType = NormalizeMedicationUseType(dto.MedicationUseType);
+            var isAsNeeded = string.Equals(userMed.MedicationUseType, "AsNeeded", StringComparison.OrdinalIgnoreCase);
+            if (isAsNeeded)
+            {
+                userMed.NotificationActive = false;
+                userMed.AdvanceReminderMinutes = null;
+                userMed.DosesPerPeriod = null;
+                userMed.PeriodUnit = null;
+                userMed.PeriodValue = null;
+                userMed.IntervalHours = null;
+                userMed.FirstDoseTime = null;
+            }
             if (dto.MaxDosesPerDay.HasValue) userMed.MaxDosesPerDay = dto.MaxDosesPerDay;
             if (dto.MinimumHoursBetweenDoses.HasValue) userMed.MinimumHoursBetweenDoses = dto.MinimumHoursBetweenDoses;
             if (dto.RefillReminderDaysBefore.HasValue) userMed.RefillReminderDaysBefore = dto.RefillReminderDaysBefore;
@@ -554,6 +565,8 @@ namespace api_test.Controllers
 
             // ── Apply schedule fields ─────────────────────────────────────────
             bool scheduleChanged = false;
+            if (isAsNeeded)
+                scheduleChanged = true;
 
             // Compare StartDate / EndDate against stored values — only flag changed if the value actually differs.
             if (dto.StartDate.HasValue)
@@ -659,7 +672,19 @@ namespace api_test.Controllers
             // ── Regenerate schedules ──────────────────────────────────────────
             if (scheduleChanged)
             {
-                if (effectiveScheduleType == "CustomTimes" && hasCustomTimes)
+                if (isAsNeeded)
+                {
+                    var pendingSchedules = await _context.MedicationSchedules
+                        .Where(s => s.UserMedicationId == userMed.Id
+                            && (s.Status == MedicationStatus.Pending || s.Status == MedicationStatus.Snoozed))
+                        .ToListAsync();
+                    if (pendingSchedules.Count > 0)
+                    {
+                        _context.MedicationSchedules.RemoveRange(pendingSchedules);
+                        await _context.SaveChangesAsync();
+                    }
+                }
+                else if (effectiveScheduleType == "CustomTimes" && hasCustomTimes)
                     await _scheduleService.RegenerateScheduleWithDoseTimesAsync(userMed, resolvedDoseTimes!);
                 else
                     await _scheduleService.RegenerateScheduleAsync(userMed);

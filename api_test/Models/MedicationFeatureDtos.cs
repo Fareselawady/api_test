@@ -82,12 +82,12 @@ namespace api_test.Models
         public int ScheduleId { get; set; }
         public int UserMedicationId { get; set; }
         public string MedicationName { get; set; } = string.Empty;
-        public DateTime ScheduledAt { get; set; }
+        public string ScheduledAt { get; set; } = string.Empty;
         public string Status { get; set; } = string.Empty;
-        public DateTime? TakenAt { get; set; }
-        public DateTime? SkippedAt { get; set; }
-        public DateTime? MissedAt { get; set; }
-        public DateTime? ActionAt { get; set; }
+        public string? TakenAt { get; set; }
+        public string? SkippedAt { get; set; }
+        public string? MissedAt { get; set; }
+        public string? ActionAt { get; set; }
         public bool IsAsNeeded { get; set; }
         public bool IsLate { get; set; }
         public string? MissedReason { get; set; }

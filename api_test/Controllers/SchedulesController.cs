@@ -418,12 +418,12 @@ namespace api_test.Controllers
                 ScheduleId = schedule.Id,
                 UserMedicationId = schedule.UserMedicationId,
                 MedicationName = UserMedicationFeatureHelper.GetDisplayName(schedule.UserMedication),
-                ScheduledAt = schedule.ScheduledAt,
+                ScheduledAt = FormatUtc(schedule.ScheduledAt),
                 Status = schedule.Status.ToString(),
-                TakenAt = schedule.TakenAt,
-                SkippedAt = schedule.SkippedAt,
-                MissedAt = schedule.MissedAt,
-                ActionAt = GetDoseEventAt(schedule),
+                TakenAt = FormatUtc(schedule.TakenAt),
+                SkippedAt = FormatUtc(schedule.SkippedAt),
+                MissedAt = FormatUtc(schedule.MissedAt),
+                ActionAt = FormatUtc(GetDoseEventAt(schedule)),
                 IsAsNeeded = false,
                 IsLate = IsLateDose(schedule),
                 MissedReason = schedule.MissedReason,
@@ -439,10 +439,10 @@ namespace api_test.Controllers
                 ScheduleId = log.Id,
                 UserMedicationId = log.UserMedicationId,
                 MedicationName = UserMedicationFeatureHelper.GetDisplayName(log.UserMedication),
-                ScheduledAt = log.TakenAt,
+                ScheduledAt = FormatUtc(log.TakenAt),
                 Status = "TakenNow",
-                TakenAt = log.TakenAt,
-                ActionAt = log.TakenAt,
+                TakenAt = FormatUtc(log.TakenAt),
+                ActionAt = FormatUtc(log.TakenAt),
                 IsAsNeeded = true,
                 IsLate = false,
                 MissedReason = log.Reason,
@@ -455,6 +455,17 @@ namespace api_test.Controllers
             => schedule.Status == MedicationStatus.Taken
                && schedule.TakenAt.HasValue
                && schedule.TakenAt.Value > schedule.ScheduledAt.AddMinutes(15);
+
+        private static string? FormatUtc(DateTime? value)
+            => value.HasValue ? FormatUtc(value.Value) : null;
+
+        private static string FormatUtc(DateTime value)
+        {
+            var utc = value.Kind == DateTimeKind.Utc
+                ? value
+                : DateTime.SpecifyKind(value, DateTimeKind.Utc);
+            return utc.ToString("yyyy-MM-ddTHH:mm:ssZ");
+        }
 
         private static int CalculateCurrentStreak(List<MedicationSchedule> schedules)
         {

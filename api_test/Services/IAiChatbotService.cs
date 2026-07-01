@@ -10,6 +10,20 @@ public interface IAiChatbotService
         CancellationToken cancellationToken = default);
 
     Task<ChatbotHealthResponse> CheckHealthAsync(CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<ChatConversationSummaryDto>> GetConversationsAsync(
+        int userId,
+        CancellationToken cancellationToken = default);
+
+    Task<ChatbotServiceResult<IReadOnlyList<ChatHistoryMessageDto>>> GetMessagesAsync(
+        int userId,
+        string conversationId,
+        CancellationToken cancellationToken = default);
+
+    Task<bool> DeleteConversationAsync(
+        int userId,
+        string conversationId,
+        CancellationToken cancellationToken = default);
 }
 
 public sealed class ChatbotServiceResult<T>

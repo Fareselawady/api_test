@@ -48,6 +48,49 @@ public sealed class ChatbotController : ControllerBase
             : StatusCode(StatusCodes.Status503ServiceUnavailable, result);
     }
 
+    [HttpGet("conversations")]
+    [ProducesResponseType<IReadOnlyList<ChatConversationSummaryDto>>(StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetConversations(CancellationToken cancellationToken)
+    {
+        if (!TryGetUserId(out var userId))
+            return Unauthorized(new { code = "invalid_token", message = "The access token does not contain a valid user ID." });
+
+        var conversations = await _chatbotService.GetConversationsAsync(userId, cancellationToken);
+        return Ok(conversations);
+    }
+
+    [HttpGet("conversations/{conversationId}/messages")]
+    [ProducesResponseType<IReadOnlyList<ChatHistoryMessageDto>>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetMessages(
+        string conversationId,
+        CancellationToken cancellationToken)
+    {
+        if (!TryGetUserId(out var userId))
+            return Unauthorized(new { code = "invalid_token", message = "The access token does not contain a valid user ID." });
+
+        var result = await _chatbotService.GetMessagesAsync(userId, conversationId, cancellationToken);
+        return result.Success
+            ? Ok(result.Value)
+            : StatusCode(result.StatusCode, new { code = result.ErrorCode, message = result.Message });
+    }
+
+    [HttpDelete("conversations/{conversationId}")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> DeleteConversation(
+        string conversationId,
+        CancellationToken cancellationToken)
+    {
+        if (!TryGetUserId(out var userId))
+            return Unauthorized(new { code = "invalid_token", message = "The access token does not contain a valid user ID." });
+
+        var deleted = await _chatbotService.DeleteConversationAsync(userId, conversationId, cancellationToken);
+        return deleted
+            ? NoContent()
+            : NotFound(new { code = "conversation_not_found", message = "The conversation was not found." });
+    }
+
     private bool TryGetUserId(out int userId)
     {
         var claim = User.FindFirstValue(ClaimTypes.NameIdentifier);

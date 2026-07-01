@@ -171,3 +171,23 @@ public sealed class ChatbotHealthResponse
     public int? StatusCode { get; set; }
     public string Message { get; set; } = string.Empty;
 }
+
+public sealed class ChatConversationSummaryDto
+{
+    public int Id { get; set; }
+    public string ConversationId { get; set; } = string.Empty;
+    public string Title { get; set; } = string.Empty;
+    public string LastMessage { get; set; } = string.Empty;
+    public DateTime UpdatedAt { get; set; }
+}
+
+public sealed class ChatHistoryMessageDto
+{
+    public string Role { get; set; } = string.Empty;
+    public string Content { get; set; } = string.Empty;
+    public DateTime CreatedAt { get; set; }
+    public string? DetectedLanguage { get; set; }
+    public string? Intent { get; set; }
+    public List<string> MatchedDrugs { get; set; } = [];
+    public List<string> SafetyFlags { get; set; } = [];
+}

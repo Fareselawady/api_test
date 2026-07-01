@@ -38,6 +38,26 @@ public sealed class AiChatbotService : IAiChatbotService
         ChatbotMessageRequest request,
         CancellationToken cancellationToken = default)
     {
+        ChatConversation? conversation = null;
+        if (!string.IsNullOrWhiteSpace(request.ConversationId))
+        {
+            var requestedConversationId = request.ConversationId.Trim();
+            conversation = await _db.ChatConversations
+                .SingleOrDefaultAsync(
+                    item => item.UserId == userId
+                        && item.AiConversationId == requestedConversationId
+                        && !item.IsDeleted,
+                    cancellationToken);
+
+            if (conversation == null)
+            {
+                return ChatbotServiceResult<ChatbotMessageResponse>.Fail(
+                    StatusCodes.Status404NotFound,
+                    "conversation_not_found",
+                    "The conversation was not found.");
+            }
+        }
+
         var aiRequest = await BuildAiRequestAsync(userId, request, cancellationToken);
         if (aiRequest == null)
         {
@@ -90,17 +110,27 @@ public sealed class AiChatbotService : IAiChatbotService
             if (aiResponse == null || string.IsNullOrWhiteSpace(aiResponse.Answer))
                 return InvalidResponse();
 
-            return ChatbotServiceResult<ChatbotMessageResponse>.Ok(new ChatbotMessageResponse
+            var result = new ChatbotMessageResponse
             {
                 Answer = aiResponse.Answer,
-                ConversationId = string.IsNullOrWhiteSpace(aiResponse.ConversationId)
-                    ? aiRequest.ConversationId
-                    : aiResponse.ConversationId,
+                ConversationId = conversation?.AiConversationId
+                    ?? (string.IsNullOrWhiteSpace(aiResponse.ConversationId)
+                        ? aiRequest.ConversationId
+                        : aiResponse.ConversationId),
                 DetectedLanguage = aiResponse.DetectedLanguage,
                 Intent = aiResponse.Intent,
                 MatchedDrugs = aiResponse.MatchedDrugs ?? [],
                 SafetyFlags = aiResponse.SafetyFlags ?? []
-            });
+            };
+
+            await PersistSuccessfulExchangeAsync(
+                userId,
+                conversation,
+                request.Message.Trim(),
+                result,
+                cancellationToken);
+
+            return ChatbotServiceResult<ChatbotMessageResponse>.Ok(result);
         }
         catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested)
         {
@@ -122,6 +152,14 @@ public sealed class AiChatbotService : IAiChatbotService
         {
             _logger.LogWarning(ex, "Could not serialize the AI chatbot request.");
             return InvalidResponse();
+        }
+        catch (DbUpdateException ex)
+        {
+            _logger.LogError(ex, "Could not save chatbot history for user {UserId}.", userId);
+            return ChatbotServiceResult<ChatbotMessageResponse>.Fail(
+                StatusCodes.Status500InternalServerError,
+                "history_save_failed",
+                "Mighty answered, but the conversation could not be saved. Please try again.");
         }
     }
 
@@ -147,6 +185,175 @@ public sealed class AiChatbotService : IAiChatbotService
         {
             _logger.LogWarning(ex, "AI chatbot health check failed.");
             return new ChatbotHealthResponse { Message = "AI chatbot service is unreachable." };
+        }
+    }
+
+    public async Task<IReadOnlyList<ChatConversationSummaryDto>> GetConversationsAsync(
+        int userId,
+        CancellationToken cancellationToken = default)
+    {
+        return await _db.ChatConversations
+            .AsNoTracking()
+            .Where(conversation => conversation.UserId == userId && !conversation.IsDeleted)
+            .OrderByDescending(conversation => conversation.UpdatedAt)
+            .Select(conversation => new ChatConversationSummaryDto
+            {
+                Id = conversation.Id,
+                ConversationId = conversation.AiConversationId,
+                Title = conversation.Title,
+                LastMessage = conversation.Messages
+                    .OrderByDescending(message => message.CreatedAt)
+                    .Select(message => message.Content)
+                    .FirstOrDefault() ?? string.Empty,
+                UpdatedAt = conversation.UpdatedAt
+            })
+            .ToListAsync(cancellationToken);
+    }
+
+    public async Task<ChatbotServiceResult<IReadOnlyList<ChatHistoryMessageDto>>> GetMessagesAsync(
+        int userId,
+        string conversationId,
+        CancellationToken cancellationToken = default)
+    {
+        var conversationDatabaseId = await _db.ChatConversations
+            .AsNoTracking()
+            .Where(item => item.UserId == userId
+                && item.AiConversationId == conversationId
+                && !item.IsDeleted)
+            .Select(item => (int?)item.Id)
+            .SingleOrDefaultAsync(cancellationToken);
+
+        if (!conversationDatabaseId.HasValue)
+        {
+            return ChatbotServiceResult<IReadOnlyList<ChatHistoryMessageDto>>.Fail(
+                StatusCodes.Status404NotFound,
+                "conversation_not_found",
+                "The conversation was not found.");
+        }
+
+        var storedMessages = await _db.ChatMessages
+            .AsNoTracking()
+            .Where(message => message.ChatConversationId == conversationDatabaseId.Value)
+            .OrderBy(message => message.CreatedAt)
+            .ThenBy(message => message.Id)
+            .Select(message => new
+            {
+                message.Role,
+                message.Content,
+                message.CreatedAt,
+                message.DetectedLanguage,
+                message.Intent,
+                message.MatchedDrugsJson,
+                message.SafetyFlagsJson
+            })
+            .ToListAsync(cancellationToken);
+
+        IReadOnlyList<ChatHistoryMessageDto> messages = storedMessages
+            .Select(message => new ChatHistoryMessageDto
+            {
+                Role = message.Role,
+                Content = message.Content,
+                CreatedAt = message.CreatedAt,
+                DetectedLanguage = message.DetectedLanguage,
+                Intent = message.Intent,
+                MatchedDrugs = DeserializeStringList(message.MatchedDrugsJson),
+                SafetyFlags = DeserializeStringList(message.SafetyFlagsJson)
+            })
+            .ToList();
+
+        return ChatbotServiceResult<IReadOnlyList<ChatHistoryMessageDto>>.Ok(messages);
+    }
+
+    public async Task<bool> DeleteConversationAsync(
+        int userId,
+        string conversationId,
+        CancellationToken cancellationToken = default)
+    {
+        var conversation = await _db.ChatConversations
+            .SingleOrDefaultAsync(
+                item => item.UserId == userId
+                    && item.AiConversationId == conversationId
+                    && !item.IsDeleted,
+                cancellationToken);
+
+        if (conversation == null)
+            return false;
+
+        conversation.IsDeleted = true;
+        conversation.UpdatedAt = DateTime.UtcNow;
+        await _db.SaveChangesAsync(cancellationToken);
+        return true;
+    }
+
+    private async Task PersistSuccessfulExchangeAsync(
+        int userId,
+        ChatConversation? conversation,
+        string userMessage,
+        ChatbotMessageResponse response,
+        CancellationToken cancellationToken)
+    {
+        var now = DateTime.UtcNow;
+        if (conversation == null)
+        {
+            conversation = new ChatConversation
+            {
+                UserId = userId,
+                AiConversationId = response.ConversationId,
+                Title = CreateConversationTitle(userMessage),
+                CreatedAt = now,
+                UpdatedAt = now
+            };
+            _db.ChatConversations.Add(conversation);
+        }
+        else
+        {
+            conversation.UpdatedAt = now;
+        }
+
+        conversation.Messages.Add(new ChatMessage
+        {
+            Role = "user",
+            Content = userMessage,
+            CreatedAt = now
+        });
+        conversation.Messages.Add(new ChatMessage
+        {
+            Role = "assistant",
+            Content = response.Answer,
+            CreatedAt = now.AddTicks(1),
+            DetectedLanguage = response.DetectedLanguage,
+            Intent = response.Intent,
+            MatchedDrugsJson = JsonSerializer.Serialize(response.MatchedDrugs, JsonOptions),
+            SafetyFlagsJson = JsonSerializer.Serialize(response.SafetyFlags, JsonOptions)
+        });
+
+        await _db.SaveChangesAsync(cancellationToken);
+    }
+
+    private static string CreateConversationTitle(string message)
+    {
+        var normalized = string.Join(' ', message.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+        if (string.IsNullOrWhiteSpace(normalized))
+            return "Mighty conversation";
+
+        const int maximumLength = 50;
+        return normalized.Length <= maximumLength
+            ? normalized
+            : $"{normalized[..maximumLength].TrimEnd()}…";
+    }
+
+    private static List<string> DeserializeStringList(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+            return [];
+
+        try
+        {
+            return JsonSerializer.Deserialize<List<string>>(json, JsonOptions) ?? [];
+        }
+        catch (JsonException)
+        {
+            return [];
         }
     }
 

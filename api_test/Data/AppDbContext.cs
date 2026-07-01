@@ -28,6 +28,8 @@ namespace api_test.Data
         public DbSet<SupportTicket> SupportTickets { get; set; }
         public DbSet<MedicineScanHistory> MedicineScanHistories { get; set; }
         public DbSet<MedicationIntakeLog> MedicationIntakeLogs { get; set; }
+        public DbSet<ChatConversation> ChatConversations { get; set; }
+        public DbSet<ChatMessage> ChatMessages { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -64,6 +66,30 @@ namespace api_test.Data
                 entity.Property(e => e.MedicationUseType).HasDefaultValue("Scheduled");
                 entity.Property(e => e.MinimumHoursBetweenDoses).HasPrecision(18, 2);
                 entity.Property(e => e.LastRefillQuantity).HasPrecision(18, 2);
+            });
+
+            modelBuilder.Entity<ChatConversation>(entity =>
+            {
+                entity.Property(e => e.AiConversationId).HasMaxLength(200);
+                entity.Property(e => e.Title).HasMaxLength(120);
+                entity.HasIndex(e => new { e.UserId, e.AiConversationId }).IsUnique();
+                entity.HasIndex(e => new { e.UserId, e.IsDeleted, e.UpdatedAt });
+                entity.HasOne(e => e.User)
+                    .WithMany(u => u.ChatConversations)
+                    .HasForeignKey(e => e.UserId)
+                    .OnDelete(DeleteBehavior.Cascade);
+            });
+
+            modelBuilder.Entity<ChatMessage>(entity =>
+            {
+                entity.Property(e => e.Role).HasMaxLength(20);
+                entity.Property(e => e.DetectedLanguage).HasMaxLength(10);
+                entity.Property(e => e.Intent).HasMaxLength(100);
+                entity.HasIndex(e => new { e.ChatConversationId, e.CreatedAt });
+                entity.HasOne(e => e.ChatConversation)
+                    .WithMany(c => c.Messages)
+                    .HasForeignKey(e => e.ChatConversationId)
+                    .OnDelete(DeleteBehavior.Cascade);
             });
 
             modelBuilder.Entity<Medication>(entity =>

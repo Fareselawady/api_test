@@ -26,6 +26,7 @@ namespace api_test.Entities
         public virtual Role Role { get; set; } = null!;
         public ICollection<UserMedication> UserMedications { get; set; } = new List<UserMedication>();
         public ICollection<Alert> Alerts { get; set; } = new List<Alert>();
+        public ICollection<ChatConversation> ChatConversations { get; set; } = new List<ChatConversation>();
 
         // ================= PREMIUM =================
         public bool IsPremium { get; set; } = false;

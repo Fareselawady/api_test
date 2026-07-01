@@ -66,6 +66,19 @@ namespace api_test
             builder.Services.AddSingleton<ITranslationService, TranslationService>();
             builder.Services.AddHostedService<NotificationBackgroundService>();
 
+            builder.Services.Configure<AiChatbotOptions>(
+                builder.Configuration.GetSection(AiChatbotOptions.SectionName));
+            builder.Services.AddHttpClient<IAiChatbotService, AiChatbotService>((services, client) =>
+            {
+                var options = services.GetRequiredService<Microsoft.Extensions.Options.IOptions<AiChatbotOptions>>().Value;
+                if (!Uri.TryCreate(options.BaseUrl, UriKind.Absolute, out var baseUri))
+                    throw new InvalidOperationException("AiChatbot:BaseUrl must be a valid absolute URL.");
+
+                client.BaseAddress = new Uri(baseUri.AbsoluteUri.TrimEnd('/') + "/");
+                client.Timeout = TimeSpan.FromSeconds(Math.Clamp(options.TimeoutSeconds, 5, 120));
+                client.DefaultRequestHeaders.Add("ngrok-skip-browser-warning", "true");
+            });
+
             // ======================
             // Medicine Image Scanning
             // ======================

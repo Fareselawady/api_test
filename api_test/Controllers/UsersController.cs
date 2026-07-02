@@ -8,6 +8,7 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using System.Security.Claims;
+using System.Text.RegularExpressions;
 
 namespace api_test.Controllers
 {
@@ -22,6 +23,84 @@ namespace api_test.Controllers
         {
             _context = context;
             _authService = authService;
+        }
+
+        [Authorize]
+        [HttpGet("me")]
+        public async Task<ActionResult<UserProfileDto>> GetMyProfile()
+        {
+            var userId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
+            var profile = await _context.Users
+                .AsNoTracking()
+                .Where(user => user.Id == userId)
+                .Select(user => new UserProfileDto
+                {
+                    Id = user.Id,
+                    FullName = user.Name,
+                    Email = user.Email,
+                    PhoneNumber = user.Phone,
+                    DateOfBirth = user.BirthDate,
+                    Gender = user.Gender
+                })
+                .FirstOrDefaultAsync();
+
+            return profile == null
+                ? NotFound(new { message = "User not found" })
+                : Ok(profile);
+        }
+
+        [Authorize]
+        [HttpPut("me")]
+        public async Task<ActionResult<UserProfileDto>> UpdateMyProfile(
+            [FromBody] UpdateMyProfileDto dto)
+        {
+            var userId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
+            var user = await _context.Users.FindAsync(userId);
+            if (user == null)
+                return NotFound(new { message = "User not found" });
+
+            var fullName = dto.FullName?.Trim() ?? string.Empty;
+            var phoneNumber = dto.PhoneNumber?.Trim() ?? string.Empty;
+            var gender = dto.Gender?.Trim() ?? string.Empty;
+
+            if (fullName.Length > 150)
+                return BadRequest(new { message = "Full name must not exceed 150 characters." });
+
+            if (phoneNumber.Length > 30 ||
+                (phoneNumber.Length > 0 && !Regex.IsMatch(phoneNumber, @"^\+?[0-9\s()-]+$")))
+            {
+                return BadRequest(new { message = "Phone number format is invalid." });
+            }
+
+            if (dto.DateOfBirth.HasValue &&
+                (dto.DateOfBirth.Value.Date > DateTime.UtcNow.Date ||
+                 dto.DateOfBirth.Value.Date < DateTime.UtcNow.Date.AddYears(-120)))
+            {
+                return BadRequest(new { message = "Date of birth is invalid." });
+            }
+
+            var allowedGenders = new[] { string.Empty, "Male", "Female", "Other" };
+            var normalizedGender = allowedGenders.FirstOrDefault(value =>
+                value.Equals(gender, StringComparison.OrdinalIgnoreCase));
+            if (normalizedGender == null)
+                return BadRequest(new { message = "Gender is invalid." });
+
+            user.Name = fullName;
+            user.Phone = phoneNumber;
+            user.BirthDate = dto.DateOfBirth?.Date;
+            user.Gender = normalizedGender;
+
+            await _context.SaveChangesAsync();
+
+            return Ok(new UserProfileDto
+            {
+                Id = user.Id,
+                FullName = user.Name,
+                Email = user.Email,
+                PhoneNumber = user.Phone,
+                DateOfBirth = user.BirthDate,
+                Gender = user.Gender
+            });
         }
 
         [Authorize(Roles = "Admin")]

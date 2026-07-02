@@ -50,6 +50,17 @@ namespace api_test.Controllers
             if (user == null)
                 return NotFound(new { message = "User not found" });
 
+            return Ok(await BuildAuthenticationResponse(
+                user,
+                token,
+                $"Welcome {user.Email}"));
+        }
+
+        private async Task<object> BuildAuthenticationResponse(
+            Entities.User user,
+            string token,
+            string message)
+        {
             var userMeds = await _context.UserMedications
                 .Include(um => um.Medication)
                 .Where(um => um.UserId == user.Id)
@@ -95,25 +106,33 @@ namespace api_test.Controllers
                 um.NotificationActive
             }).ToList();
 
-            return Ok(new
+            return new
             {
-                message = $"Welcome {user.Email}",
+                message,
                 token,
-                user = new { user.Id, user.Email },
+                user = new
+                {
+                    user.Id,
+                    user.Email,
+                    Role = user.Role?.RoleName
+                },
                 myDrugs = userMedsResult
-            });
+            };
         }
 
         // ===== VERIFY OTP (Registration flow) =====
         [HttpPost("verify-register-otp")]
         public async Task<IActionResult> VerifyRegisterOtp(VerifyOtpDto dto)
         {
-            var token = await _authService.VerifyOtpAsync(dto.PendingToken, dto.Otp);
+            var result = await _authService.VerifyOtpAsync(dto.PendingToken, dto.Otp);
 
-            if (string.IsNullOrEmpty(token))
+            if (result == null)
                 return BadRequest(new { message = "Invalid or expired OTP" });
 
-            return Ok(new { message = "Email verified", token });
+            return Ok(await BuildAuthenticationResponse(
+                result.User,
+                result.Token,
+                "Email verified"));
         }
 
         // ===== AUTHENTICATED ENDPOINTS =====

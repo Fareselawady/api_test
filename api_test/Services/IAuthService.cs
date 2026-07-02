@@ -9,8 +9,9 @@ namespace api_test.Services
         // Register: generates OTP, stores temp user, returns pendingToken (or null on failure)
         Task<RegisterInitResult?> RegisterAsync(UserDto request);
 
-        // VerifyOtp: verifies OTP using pendingToken, creates user, returns JWT
-        Task<string?> VerifyOtpAsync(string pendingToken, string otp);
+        // VerifyOtp: verifies OTP using pendingToken, creates user and returns
+        // the authenticated user together with the JWT.
+        Task<RegisterVerificationResult?> VerifyOtpAsync(string pendingToken, string otp);
 
         // Login: validates credentials directly, returns JWT immediately — NO OTP
         Task<string?> LoginAsync(UserDto request);

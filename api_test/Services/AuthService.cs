@@ -16,6 +16,12 @@ namespace api_test.Services
         public string PendingToken { get; set; } = null!;
     }
 
+    public class RegisterVerificationResult
+    {
+        public string Token { get; set; } = null!;
+        public User User { get; set; } = null!;
+    }
+
     public class AuthService : IAuthService
     {
         private readonly AppDbContext _context;
@@ -98,7 +104,7 @@ namespace api_test.Services
         // pendingToken is the GUID returned by RegisterAsync.
         // Looks up the temp user, verifies OTP by direct string comparison,
         // creates the real user, returns JWT on success.
-        public async Task<string?> VerifyOtpAsync(string pendingToken, string otp)
+        public async Task<RegisterVerificationResult?> VerifyOtpAsync(string pendingToken, string otp)
         {
             if (string.IsNullOrWhiteSpace(pendingToken) || string.IsNullOrWhiteSpace(otp))
                 return null;
@@ -137,6 +143,11 @@ namespace api_test.Services
                 _tempUsers.Remove(pendingToken);
             }
 
+            // A second pending registration for the same address may have been
+            // verified first. Keep the database free of duplicate accounts.
+            if (await _context.Users.AnyAsync(u => u.Email == temp.Email))
+                return null;
+
             // Create the real verified user
             var newUser = new User
             {
@@ -150,7 +161,11 @@ namespace api_test.Services
             await _context.SaveChangesAsync();
             await _context.Entry(newUser).Reference(u => u.Role).LoadAsync();
 
-            return CreateToken(newUser);
+            return new RegisterVerificationResult
+            {
+                Token = CreateToken(newUser),
+                User = newUser
+            };
         }
 
         // ===== LOGIN =====
@@ -179,7 +194,9 @@ namespace api_test.Services
         public async Task<User?> GetUserByEmailAsync(string email)
         {
             email = email.ToLower().Trim();
-            return await _context.Users.FirstOrDefaultAsync(u => u.Email == email);
+            return await _context.Users
+                .Include(u => u.Role)
+                .FirstOrDefaultAsync(u => u.Email == email);
         }
 
         // ===== JWT TOKEN =====

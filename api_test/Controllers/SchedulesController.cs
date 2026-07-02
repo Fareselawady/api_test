@@ -15,11 +15,16 @@ namespace api_test.Controllers
     {
         private readonly IScheduleService _scheduleService;
         private readonly AppDbContext _context;
+        private readonly ITranslationService _translationService;
 
-        public SchedulesController(IScheduleService scheduleService, AppDbContext context)
+        public SchedulesController(
+            IScheduleService scheduleService,
+            AppDbContext context,
+            ITranslationService translationService)
         {
             _scheduleService = scheduleService;
             _context = context;
+            _translationService = translationService;
         }
 
         // ── GET /api/medications/{userMedId}/schedules ────────────────────────
@@ -170,7 +175,8 @@ namespace api_test.Controllers
         [HttpGet("api/users/me/adherence-summary")]
         public async Task<ActionResult<AdherenceSummaryDto>> GetMyAdherenceSummary(
             [FromQuery] DateTime? from,
-            [FromQuery] DateTime? to)
+            [FromQuery] DateTime? to,
+            [FromQuery] string lang = "en")
         {
             var userId = GetUserId();
             var range = ResolveRange(from, to);
@@ -195,13 +201,14 @@ namespace api_test.Controllers
                 .OrderBy(s => GetDoseEventAt(s) ?? s.ScheduledAt)
                 .ToList();
 
-            var summary = BuildAdherenceSummary(schedules, range.From, range.To, null);
+            var summary = BuildAdherenceSummary(schedules, range.From, range.To, null, lang);
             summary.Medications = userMeds
                 .Select(um => BuildMedicationAdherenceSummary(
                     um,
                     schedules.Where(s => s.UserMedicationId == um.Id).ToList(),
                     range.From,
-                    range.To))
+                    range.To,
+                    lang))
                 .ToList();
 
             return Ok(summary);
@@ -211,7 +218,8 @@ namespace api_test.Controllers
         public async Task<ActionResult<AdherenceSummaryDto>> GetMedicationAdherence(
             int userMedId,
             [FromQuery] DateTime? from,
-            [FromQuery] DateTime? to)
+            [FromQuery] DateTime? to,
+            [FromQuery] string lang = "en")
         {
             var userId = GetUserId();
             var range = ResolveRange(from, to);
@@ -235,13 +243,14 @@ namespace api_test.Controllers
                 .OrderBy(s => GetDoseEventAt(s) ?? s.ScheduledAt)
                 .ToList();
 
-            return Ok(BuildAdherenceSummary(schedules, range.From, range.To, userMedId));
+            return Ok(BuildAdherenceSummary(schedules, range.From, range.To, userMedId, lang));
         }
 
         [HttpGet("api/users/me/dose-history")]
         public async Task<ActionResult<List<DoseHistoryDto>>> GetMyDoseHistory(
             [FromQuery] DateTime? from,
-            [FromQuery] DateTime? to)
+            [FromQuery] DateTime? to,
+            [FromQuery] string lang = "en")
         {
             var userId = GetUserId();
             var range = ResolveRange(from, to);
@@ -266,10 +275,10 @@ namespace api_test.Controllers
 
             return Ok(schedules
                 .OrderByDescending(s => GetDoseEventAt(s) ?? s.ScheduledAt)
-                .Select(ToDoseHistoryDto)
+                .Select(schedule => ToDoseHistoryDto(schedule, lang))
                 .Concat(intakeLogs
                     .OrderByDescending(l => l.TakenAt)
-                    .Select(ToAsNeededDoseHistoryDto))
+                    .Select(log => ToAsNeededDoseHistoryDto(log, lang)))
                 .OrderByDescending(h => h.ActionAt ?? h.ScheduledAt)
                 .ToList());
         }
@@ -321,11 +330,12 @@ namespace api_test.Controllers
             };
         }
 
-        private static AdherenceSummaryDto BuildAdherenceSummary(
+        private AdherenceSummaryDto BuildAdherenceSummary(
             List<MedicationSchedule> schedules,
             DateTime from,
             DateTime to,
-            int? userMedicationId)
+            int? userMedicationId,
+            string lang)
         {
             var total = schedules.Count;
             var taken = schedules.Count(s => s.Status == MedicationStatus.Taken);
@@ -343,7 +353,7 @@ namespace api_test.Controllers
                 .ToList();
 
             var medicationName = schedules.FirstOrDefault()?.UserMedication is { } userMed
-                ? UserMedicationFeatureHelper.GetDisplayName(userMed)
+                ? UserMedicationFeatureHelper.GetDisplayName(userMed, _translationService, lang)
                 : null;
 
             return new AdherenceSummaryDto
@@ -368,11 +378,12 @@ namespace api_test.Controllers
             };
         }
 
-        private static MedicationAdherenceSummaryDto BuildMedicationAdherenceSummary(
+        private MedicationAdherenceSummaryDto BuildMedicationAdherenceSummary(
             UserMedication userMedication,
             List<MedicationSchedule> schedules,
             DateTime from,
-            DateTime to)
+            DateTime to,
+            string lang)
         {
             var total = schedules.Count;
             var taken = schedules.Count(s => s.Status == MedicationStatus.Taken);
@@ -392,7 +403,10 @@ namespace api_test.Controllers
             return new MedicationAdherenceSummaryDto
             {
                 UserMedicationId = userMedication.Id,
-                MedicationName = UserMedicationFeatureHelper.GetDisplayName(userMedication),
+                MedicationName = UserMedicationFeatureHelper.GetDisplayName(
+                    userMedication,
+                    _translationService,
+                    lang),
                 From = from,
                 To = to,
                 TotalDoses = total,
@@ -411,13 +425,16 @@ namespace api_test.Controllers
             };
         }
 
-        private static DoseHistoryDto ToDoseHistoryDto(MedicationSchedule schedule)
+        private DoseHistoryDto ToDoseHistoryDto(MedicationSchedule schedule, string lang)
         {
             return new DoseHistoryDto
             {
                 ScheduleId = schedule.Id,
                 UserMedicationId = schedule.UserMedicationId,
-                MedicationName = UserMedicationFeatureHelper.GetDisplayName(schedule.UserMedication),
+                MedicationName = UserMedicationFeatureHelper.GetDisplayName(
+                    schedule.UserMedication,
+                    _translationService,
+                    lang),
                 ScheduledAt = FormatUtc(schedule.ScheduledAt),
                 Status = schedule.Status.ToString(),
                 TakenAt = FormatUtc(schedule.TakenAt),
@@ -432,13 +449,16 @@ namespace api_test.Controllers
             };
         }
 
-        private static DoseHistoryDto ToAsNeededDoseHistoryDto(MedicationIntakeLog log)
+        private DoseHistoryDto ToAsNeededDoseHistoryDto(MedicationIntakeLog log, string lang)
         {
             return new DoseHistoryDto
             {
                 ScheduleId = log.Id,
                 UserMedicationId = log.UserMedicationId,
-                MedicationName = UserMedicationFeatureHelper.GetDisplayName(log.UserMedication),
+                MedicationName = UserMedicationFeatureHelper.GetDisplayName(
+                    log.UserMedication,
+                    _translationService,
+                    lang),
                 ScheduledAt = FormatUtc(log.TakenAt),
                 Status = "TakenNow",
                 TakenAt = FormatUtc(log.TakenAt),

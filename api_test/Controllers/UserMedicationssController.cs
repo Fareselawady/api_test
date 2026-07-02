@@ -328,6 +328,9 @@ namespace api_test.Controllers
                     Id = um.Id,
                     MedicationId = um.MedicationId,
                     MedicationName = finalName,
+                    CanonicalMedicationName = um.IsCustomMedication
+                        ? um.MedicationName
+                        : um.Medication?.Trade_name ?? um.MedicationName,
                     IsCustomMedication = um.IsCustomMedication,
                     SupportsInteractions = UserMedicationFeatureHelper.SupportsInteractions(um),
                     SupportsIngredientWarnings = UserMedicationFeatureHelper.SupportsIngredientWarnings(um),
@@ -939,7 +942,8 @@ namespace api_test.Controllers
         }
 
         [HttpGet("/api/users/me/cabinet-health")]
-        public async Task<ActionResult<CabinetHealthDto>> GetCabinetHealth()
+        public async Task<ActionResult<CabinetHealthDto>> GetCabinetHealth(
+            [FromQuery] string lang = "en")
         {
             var userId = GetUserId();
             var now = DateTime.UtcNow;
@@ -967,18 +971,18 @@ namespace api_test.Controllers
                     && med.AfterOpeningExpiryDate.Value.Date <= now.Date.AddDays(7);
 
                 if (expired)
-                    dashboard.Expired.Add(BuildCabinetItem(med, forecast, "Critical", "Medication is expired."));
+                    dashboard.Expired.Add(BuildCabinetItem(med, forecast, "Critical", "Medication is expired.", lang));
                 if (expiringSoon)
-                    dashboard.ExpiringSoon.Add(BuildCabinetItem(med, forecast, "Warning", "Medication expires within 7 days."));
+                    dashboard.ExpiringSoon.Add(BuildCabinetItem(med, forecast, "Warning", "Medication expires within 7 days.", lang));
                 if (afterOpeningSoon)
-                    dashboard.AfterOpeningExpiringSoon.Add(BuildCabinetItem(med, forecast, "Warning", "Opened medication expires soon."));
+                    dashboard.AfterOpeningExpiringSoon.Add(BuildCabinetItem(med, forecast, "Warning", "Opened medication expires soon.", lang));
                 if (outOfStock)
-                    dashboard.OutOfStock.Add(BuildCabinetItem(med, forecast, "Critical", "Medication is out of stock."));
+                    dashboard.OutOfStock.Add(BuildCabinetItem(med, forecast, "Critical", "Medication is out of stock.", lang));
                 else if (lowStock)
-                    dashboard.LowStock.Add(BuildCabinetItem(med, forecast, "Warning", "Medication stock is low."));
+                    dashboard.LowStock.Add(BuildCabinetItem(med, forecast, "Warning", "Medication stock is low.", lang));
 
                 if (!expired && !expiringSoon && !afterOpeningSoon && !outOfStock && !lowStock)
-                    dashboard.Healthy.Add(BuildCabinetItem(med, forecast, "Info", "Medication looks healthy."));
+                    dashboard.Healthy.Add(BuildCabinetItem(med, forecast, "Info", "Medication looks healthy.", lang));
             }
 
             return Ok(dashboard);
@@ -1497,16 +1501,20 @@ namespace api_test.Controllers
             };
         }
 
-        private static CabinetMedicationDto BuildCabinetItem(
+        private CabinetMedicationDto BuildCabinetItem(
             UserMedication userMed,
             RefillForecastDto forecast,
             string severity,
-            string reason)
+            string reason,
+            string lang)
         {
             return new CabinetMedicationDto
             {
                 UserMedicationId = userMed.Id,
-                MedicationName = UserMedicationFeatureHelper.GetDisplayName(userMed),
+                MedicationName = UserMedicationFeatureHelper.GetDisplayName(
+                    userMed,
+                    _translationService,
+                    lang),
                 Severity = severity,
                 EffectiveExpiryDate = MedicationExpiryHelper.GetEffectiveExpiryDate(userMed),
                 AfterOpeningExpiryDate = userMed.AfterOpeningExpiryDate,

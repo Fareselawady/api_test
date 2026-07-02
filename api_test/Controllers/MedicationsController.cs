@@ -60,6 +60,10 @@ namespace api_test.Controllers
                 return new
                 {
                     m.ID,
+                    CanonicalName = m.Trade_name,
+                    DisplayName = string.IsNullOrWhiteSpace(translatedName)
+                        ? m.Trade_name
+                        : translatedName,
                     Trade_name = string.IsNullOrWhiteSpace(translatedName)
                         ? m.Trade_name
                         : translatedName,
@@ -86,19 +90,71 @@ namespace api_test.Controllers
 
         [Authorize]
         [HttpGet("check-interaction")]
-        public async Task<IActionResult> CheckDrugInteraction([FromQuery] List<string> medNames)
+        public async Task<IActionResult> CheckDrugInteraction(
+            [FromQuery(Name = "medIds")] List<int>? medicationIds,
+            [FromQuery] List<string>? medNames,
+            [FromQuery] string lang = "en")
         {
-            if (medNames == null || medNames.Count < 2 || medNames.Count > 10)
+            medicationIds ??= new List<int>();
+            medNames ??= new List<string>();
+
+            var requestedCount = medicationIds.Count > 0
+                ? medicationIds.Count
+                : medNames.Count;
+            if (requestedCount < 2 || requestedCount > 10)
                 return BadRequest(new { Message = "Please provide between 2 and 10 medications." });
 
-            // جيب كل الأدوية
-            var medications = await _context.Medications
-    .Where(m => m.Trade_name != null && medNames.Contains(m.Trade_name))
-    .ToListAsync();
-            // تحقق إن كل الأدوية موجودة
-            var notFound = medNames.Except(medications.Select(m => m.Trade_name)).ToList();
-            if (notFound.Any())
-                return NotFound(new { Message = $"Not found: {string.Join(", ", notFound)}" });
+            List<Medication> medications;
+            var unresolved = new List<string>();
+
+            if (medicationIds.Count > 0)
+            {
+                var distinctIds = medicationIds.Distinct().ToList();
+                medications = await _context.Medications
+                    .Where(m => distinctIds.Contains(m.ID))
+                    .ToListAsync();
+
+                unresolved.AddRange(distinctIds
+                    .Except(medications.Select(m => m.ID))
+                    .Select(id => id.ToString()));
+            }
+            else
+            {
+                medications = new List<Medication>();
+                foreach (var requestedName in medNames)
+                {
+                    var normalizedName = requestedName?.Trim();
+                    if (string.IsNullOrWhiteSpace(normalizedName))
+                    {
+                        unresolved.Add(requestedName ?? string.Empty);
+                        continue;
+                    }
+
+                    var translatedId = _translationService.FindMedIdByName(normalizedName);
+                    var medication = translatedId.HasValue
+                        ? await _context.Medications.FirstOrDefaultAsync(m => m.ID == translatedId.Value)
+                        : await _context.Medications.FirstOrDefaultAsync(m =>
+                            m.Trade_name != null &&
+                            m.Trade_name.Trim().ToLower() == normalizedName.ToLower());
+
+                    if (medication == null)
+                        unresolved.Add(normalizedName);
+                    else if (medications.All(m => m.ID != medication.ID))
+                        medications.Add(medication);
+                }
+            }
+
+            if (unresolved.Count > 0)
+            {
+                return NotFound(new
+                {
+                    Message = $"Could not resolve: {string.Join(", ", unresolved)}",
+                    UnresolvedMedications = unresolved
+                });
+            }
+
+            if (medications.Count < 2)
+                return BadRequest(new { Message = "Please provide at least two different medications." });
 
             // جيب المواد الفعالة لكل دواء
             var medIds = medications.Select(m => m.ID).ToList();
@@ -126,8 +182,11 @@ namespace api_test.Controllers
 
                     var interactions = await _context.Drug_Interactions
                         .Where(di =>
-                            (ing1.Contains(di.Ingredient_1_id!.Value) && ing2.Contains(di.Ingredient_2_id!.Value)) ||
-                            (ing1.Contains(di.Ingredient_2_id!.Value) && ing2.Contains(di.Ingredient_1_id!.Value))
+                            di.Ingredient_1_id.HasValue &&
+                            di.Ingredient_2_id.HasValue &&
+                            ((ing1.Contains(di.Ingredient_1_id.Value) && ing2.Contains(di.Ingredient_2_id.Value)) ||
+                            (ing1.Contains(di.Ingredient_2_id.Value) && ing2.Contains(di.Ingredient_1_id.Value))
+                            )
                         )
                         .ToListAsync();
 
@@ -135,11 +194,15 @@ namespace api_test.Controllers
                     {
                         results.Add(new
                         {
-                            Med1 = med1.Trade_name,
-                            Med2 = med2.Trade_name,
+                            Med1Id = med1.ID,
+                            Med2Id = med2.ID,
+                            Med1 = LocalizedMedicationName(med1, lang),
+                            Med2 = LocalizedMedicationName(med2, lang),
                             Interactions = interactions.Select(i => new
                             {
-                                i.Interaction_type
+                                Interaction_type = _translationService.GetInteractionReason(
+                                    i.Interaction_type ?? string.Empty,
+                                    lang)
                             })
                         });
                     }
@@ -154,6 +217,14 @@ namespace api_test.Controllers
                 Message = "Interactions found!",
                 Results = results
             });
+        }
+
+        private string LocalizedMedicationName(Medication medication, string lang)
+        {
+            var translated = _translationService.GetMedName(medication.ID, lang);
+            return string.IsNullOrWhiteSpace(translated)
+                ? medication.Trade_name ?? string.Empty
+                : translated;
         }
 
         [Authorize(Roles = "Admin")]

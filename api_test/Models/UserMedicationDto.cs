@@ -5,6 +5,7 @@ namespace api_test.Models
         public int Id { get; set; }
         public int? MedicationId { get; set; }
         public string MedicationName { get; set; } = string.Empty;
+        public string CanonicalMedicationName { get; set; } = string.Empty;
         public bool IsCustomMedication { get; set; }
         public bool SupportsInteractions { get; set; }
         public bool SupportsIngredientWarnings { get; set; }
